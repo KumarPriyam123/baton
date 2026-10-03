@@ -92,6 +92,8 @@ every other column (item_seq, version, team_id on a transfer...) is untouched.
 
 ## 14. Phase 2: removing or demoting a member is refused while they own open items
 
+**Superseded in phase 4:** the commands now unassign the person's open items in the same transaction (SPEC 4.3b); see the end of this file. What follows is the phase 2 reasoning.
+
 SPEC 4.3b wants those items unassigned in the same transaction, which needs `record_event()` and the
 workflow (phases 3 and 4). Writing `work_items` from the membership code would break I1, so for now
 `DELETE` and "demote to viewer" return 409 `WORKFLOW_VIOLATION` ("They still own N open items...")
@@ -184,6 +186,8 @@ event_id)`) is the same either way. NOTIFY is also per event.
 - `changes_since` is capped at 100 events (a bound, not a page).
 
 ## 27. Phase 3: material edits are refused while an approval is on record (until phase 4)
+
+**Superseded in phase 4:** a PATCH of a material field invalidates every pending or stale approved approval in the same transaction (decision 37). What follows is the phase 3 reasoning.
 
 SPEC 4.4 says a material edit invalidates approvals. That is phase 4, but seeded data already has
 `awaiting_approval` and approved items. Rather than let a title change slip past an approval (SPEC A6),
@@ -334,3 +338,50 @@ is a normal 404. The stored idempotent body is the same. Decided with Kumar.
   after the lock would hide a missing `assignee_id IS NULL` and the sabotage row could not go red. The
   same rule is data in `workflow.py` (for `allowed_actions` and T-FLOW) and a test ties the SQL guard
   to it.
+
+## 40. Phase 4: `approve` does not re-hash the content
+
+A second check in `decide` (the pending approval's `subject_hash` must equal the hash of the item now)
+would be harmless to correctness, but it would also hide the one guard the SPEC names. SPEC 4.4 makes
+the invalidation inside the editing transaction, plus `If-Match` on approve, the protection. With a
+re-hash in `approve`, removing the invalidation would make approve refuse instead of approving stale
+content, and T-APPROVE-RACE would stay green. The test holds the invariant "an approved row always
+covers the current content" over 50 rounds, so the invalidation is what it exercises.
+
+## 41. Phase 4: two clauses of the conditional UPDATEs are redundant for the race
+
+- The claim UPDATE has `assignee_id IS NULL AND status = 'new'` (SPEC 6.1). Either clause alone stops
+  twenty claimants, because the winner changes both in the same statement. `assignee_id IS NULL`
+  guards bad data (an owner on a `new` item) and has its own tests.
+- `PATCH` compares the version in Python under the row lock (`ensure_version`) and again in the UPDATE
+  (`version = :expected`). Either alone gives 412. Both are kept on purpose; each has its own test.
+
+BUILD_PLAN's sabotage table says "remove `assignee_id IS NULL`: T-CLAIM goes red". It does not, for the
+reason above; TESTING.md records what actually goes red for each clause.
+
+## 42. Phase 4: whoever becomes an owner is checked against the membership row, locked
+
+`claim`, `assign`, a `reopen` that gives the item back to its previous owner, and a `transfer` that
+keeps the owner read the new owner's role with `SELECT ... FOR SHARE` on their `memberships` row
+(`teams.share_lock_role`). Removing or demoting that person takes the row `FOR UPDATE` first
+(`get_role(for_update=True)`), so one of the two waits: either the removal then finds and unassigns the
+item (SPEC 4.3b), or the claim sees that the role is gone. The actor context is loaded before the
+command (decision 34), so without this a claim could land just after a removal. The lock orders differ
+(a command locks item then membership; a removal locks membership then items), so a deadlock is
+possible; `run_command` retries it (40P01, up to 3 times). Tested by two race tests (15 and 8 rounds).
+
+## 43. Phase 4: reading choices in `allowed_actions`
+
+- **Resolve is offered without an approval.** The UI shows Resolve and the server answers 422
+  `APPROVAL_REQUIRED`, which SPEC 12 says "points to Request approval" (and CB4's demo is "try to resolve
+  a payment item"). `next_step` and the approval controls tell the person what to do first.
+- **A second cancel** of an already cancelled request is 403 for a member (nobody "asked" any more) and
+  409 for a lead. Policy decides who may cancel from the pending request, and there is none.
+- **`GET` of an item with no pending approval** never offers `approve`, `reject` or `cancel_approval`.
+
+## 44. Phase 4: unassigning a person's items is bounded, and deactivation has no endpoint yet
+
+`unassign_owned_items` locks and clears the person's open items in the team 100 at a time inside the
+membership transaction (I8). SPEC 4.3b also lists deactivating an account; there is no deactivate
+endpoint in SPEC 11, so nothing calls it for that case. When one exists it must call this function for
+each of the person's teams in the same transaction as the deactivation.

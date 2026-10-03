@@ -128,3 +128,51 @@ Facts about these tests worth knowing:
   scratch database.
 
 Whole suite at the end of phase 3: 3,129 API tests, about 165 s.
+
+## Phase 4 guards (workflow, ownership, approvals)
+
+Each row was observed red on a scratch branch cut from a committed tree (never committed, branch
+deleted), by editing one line and restoring it with `git checkout`. The five rows of the BUILD_PLAN
+table are first; the others are the rows that did not behave the way the table assumed.
+
+| Remove this guard | Where | Tests that went red |
+|---|---|---|
+| `assignee_id IS NULL` **and** `status = 'new'` in the claim UPDATE (no guard at all) | `repo/items.py` `claim_item` | T-CLAIM, both flavours: service level (`assert 20 == 1`: twenty winners) and HTTP (`[200, 200, ...]` instead of one 200 and nineteen 409) |
+| `assignee_id IS NULL` alone | same | `tests/integration/test_item_ownership.py::test_a_claim_never_takes_an_item_that_has_an_owner_even_if_its_status_says_new` and `tests/db/test_item_repo_guards.py::test_a_claim_on_an_item_that_has_an_owner_matches_nothing_even_if_it_says_new`. **T-CLAIM stays green**: `status = 'new'` alone already stops the race, because the winner changes the status in the same UPDATE. The clause guards bad data (an owner on a `new` item), so it has its own tests |
+| `version = :expected` in `update_item` alone | `repo/items.py` | `test_an_update_on_a_stale_version_writes_nothing` only. T-STALE stays green: `ensure_version` compares under the row lock first |
+| `ensure_version` in `edit_item` alone | `services/items.py` | `test_a_stale_edit_that_would_change_nothing_is_still_412` only. The SQL clause still turns a changed edit into a 412 |
+| both of the two above | | 10 tests: T-STALE (`test_approve_racing_an_edit...` and the patch tests), `test_a_stale_edit_is_412...`, `test_a_failed_edit_writes_no_event_and_no_outbox_row`, `test_a_stale_patch_is_replayed_too...`, the repo guard |
+| Invalidation of approvals on a material edit | `workflow.plan_edit` (`stale = []`) | T-APPROVE-RACE `test_approve_racing_an_edit_never_leaves_an_approval_on_content_nobody_reviewed` (the approval stays `approved` or `pending` on text nobody reviewed) |
+| The `If-Match` check in approve | `services/commands.py` `decide` | 5 tests: T-APPROVE-RACE, `test_ten_requests_to_approve_one_request_approve_it_once`, `test_a_lead_cancelling_while_another_approves_has_one_outcome`, `test_deciding_on_a_stale_view_is_412_and_approves_nothing`, `test_editing_the_content_of_a_waiting_request_invalidates_it` |
+| The approval check in resolve | `workflow.evaluate` | T-FLOW `test_resolving_a_requires_approval_item_without_a_valid_approval_is_approval_required`, `test_a_payment_investigation_cannot_be_resolved_without_an_approval`, `test_resolving_works_once_a_lead_has_approved_and_stops_working_after_an_edit` |
+
+What the first two rows teach: when the BUILD_PLAN says "remove the guard and T-CLAIM goes red" it
+means the whole conditional UPDATE. Two of its clauses are redundant for the race itself and exist
+for bad data, which is why they have tests that take them one at a time.
+
+Other guards of this phase:
+
+| Guard | Test |
+|---|---|
+| Every action x status x relationship follows SPEC 4.1 and 5.2, from a table typed by hand | `tests/unit/test_workflow_flow.py::test_every_status_and_relationship_gets_the_answer_the_spec_gives` (15 actions; 720 cells) |
+| The transition table equals the seed simulator's independent copy | `test_the_transition_table_agrees_with_the_seed_simulators_independent_copy` |
+| Every seeded history replays through `workflow.evaluate`, `plan_edit` invalidates what the history says | `tests/unit/test_seed_replay_workflow.py` (6 seeds x 600 histories; two kinds of corruption must be reported) |
+| 20 claims, each on its own connection, released by an `asyncio.Barrier`: one wins, nineteen `ALREADY_CLAIMED` with owner and time, one `assigned` event, version + 1 | `tests/concurrency/test_workflow_concurrency.py::test_claim_twenty_concurrent_requests_exactly_one_wins` (and the HTTP twin) |
+| 50 rounds of approve racing an edit (half material, half not): exactly one wins the version, the loser is 412, an approved approval always covers the current content, nothing is approved at a version the lead did not review | `::test_approve_racing_an_edit_never_leaves_an_approval_on_content_nobody_reviewed` |
+| Two approval requests at once: one 201, one 409 `APPROVAL_ALREADY_PENDING` (decision 35) | `::test_two_requests_for_approval_at_once_one_is_201_and_one_is_409` |
+| An assignment or claim racing a removal never leaves the removed person owning the item (share lock on the membership row) | `::test_assigning_someone_while_they_are_being_removed...`, `::test_claims_by_a_member_being_removed...` |
+| Four-eyes: policy says 403; with policy bypassed the database CHECK says 403 and rolls back | `test_item_approvals.py::test_the_database_refuses_a_self_approval_even_if_the_policy_is_bypassed` |
+| Removing or demoting a member unassigns their open items in the same transaction, cancels a waiting approval first, and rolls back as one | `tests/integration/test_membership_unassigns.py` |
+| A transfer keeps the key, moves or unassigns the owner, cancels or invalidates approvals, names the old team in the live-update notice | `tests/integration/test_item_transfer.py` |
+| `allowed_actions` for ten demo personas on a sample of seeded Payments items (up to 3 per status) equals the SPEC table | `tests/integration/test_item_personas.py` |
+
+Facts worth knowing:
+
+- The race tests release their requests together with `asyncio.Barrier`, and the service-level T-CLAIM
+  uses 20 engine connections of its own. The HTTP flavours use one app and 20 signed-in clients.
+- In the approve/edit race the loser of the version retries after a fresh read, the way the web client
+  rebases after a 412, so the "approve first, then an invalidating edit" order is exercised as well.
+- There is deliberately **no second check in `approve` that the approval still matches the content**:
+  with one, removing the invalidation would leave the race test green (the approve would refuse), and
+  the invalidation is what the SPEC names as the guard.
+
