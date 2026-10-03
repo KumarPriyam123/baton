@@ -177,6 +177,24 @@ async def test_comments_and_system_events_never_change_the_version(
     assert changed == 0
 
 
+async def test_read_markers_point_at_events_of_their_own_item(seeded: SeededDatabase) -> None:
+    stray = await _value(
+        seeded,
+        "SELECT count(*) FROM item_reads r WHERE NOT EXISTS "
+        "(SELECT 1 FROM item_events e WHERE e.id = r.last_read_event_id AND e.item_id = r.item_id)",
+    )
+    total = await _value(seeded, "SELECT count(*) FROM item_reads")
+    unread = await _value(
+        seeded,
+        "SELECT count(*) FROM item_reads r JOIN work_items i ON i.id = r.item_id "
+        "WHERE r.last_read_event_id < i.last_event_id",
+    )
+
+    assert total > 300
+    assert stray == 0
+    assert unread > 50  # "Your requests" has activity since the reader last looked
+
+
 async def test_event_ids_follow_time(seeded: SeededDatabase) -> None:
     out_of_order = await _value(
         seeded,

@@ -98,7 +98,9 @@ def _ref(value: Any) -> Any:
 Row = Any  # an asyncpg.Record from the database, or a dict in unit tests
 
 
-def check_item(item: Row, events: list[Row], approvals: list[Row]) -> list[str]:
+def check_item(
+    item: Row, events: list[Row], approvals: list[Row], reads: list[Row] | None = None
+) -> list[str]:
     key = item["key"]
     problems: list[str] = []
 
@@ -226,6 +228,12 @@ def check_item(item: Row, events: list[Row], approvals: list[Row]) -> list[str]:
     if item["due_at"] != _parse(state["due_at"]):
         bad(f"stored due_at={item['due_at']!r} but the history says {state['due_at']!r}")
 
+    event_ids = {e["id"] for e in events}
+    for read in reads or []:
+        if read["last_read_event_id"] not in event_ids:
+            marker = read["last_read_event_id"]
+            bad(f"user {read['user_id']} has read up to event {marker}, which is not this item's")
+
     pending = [a for a in approvals if a["status"] == "pending"]
     if (item["status"] == "awaiting_approval") != bool(pending):
         bad("status awaiting_approval and the pending approval disagree")
@@ -257,7 +265,13 @@ async def verify_histories(
     for r in await conn.fetch("SELECT * FROM approvals WHERE item_id = ANY($1)", ids):
         approvals[r["item_id"]].append(r)
 
+    reads: dict[uuid.UUID, list[asyncpg.Record]] = {i: [] for i in ids}
+    for r in await conn.fetch("SELECT * FROM item_reads WHERE item_id = ANY($1)", ids):
+        reads[r["item_id"]].append(r)
+
     problems: list[str] = []
     for item_id in ids:
-        problems.extend(check_item(items[item_id], events[item_id], approvals[item_id]))
+        problems.extend(
+            check_item(items[item_id], events[item_id], approvals[item_id], reads[item_id])
+        )
     return len(ids), problems

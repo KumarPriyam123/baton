@@ -75,10 +75,20 @@ async def load(conn: asyncpg.Connection, ds: g.Dataset, *, reset: bool) -> bool:
         await _copy(conn, "work_items", g.ITEM_COLS, ds.items)
         # Events go in global time order, so identity ids follow time (cursors, BRIN index).
         await _copy(conn, "item_events", g.EVENT_COLS, ds.events)
+        # Identity ids were assigned in COPY order, so an event's id is its position plus an
+        # offset (0 after a RESTART IDENTITY reset). Read markers point at events by position.
+        first_id, last_id, event_count = await conn.fetchrow(
+            "SELECT min(id), max(id), count(*) FROM item_events"
+        )
+        assert last_id - first_id + 1 == event_count == len(ds.events), "event ids not contiguous"
+        offset = first_id - 1
+        reads: list[tuple[object, ...]] = [
+            (user, item, position + offset, at) for user, item, position, at in ds.reads
+        ]
         await _copy(conn, "comments", g.COMMENT_COLS, ds.comments)
         await _copy(conn, "approvals", g.APPROVAL_COLS, ds.approvals)
         await _copy(conn, "watchers", g.WATCHER_COLS, ds.watchers)
-        await _copy(conn, "item_reads", g.READ_COLS, ds.reads)
+        await _copy(conn, "item_reads", g.READ_COLS, reads)
         await _copy(conn, "item_similar", g.SIMILAR_COLS, ds.similar)
 
         await conn.execute(

@@ -69,3 +69,12 @@ A keyset cursor on that expression cannot use the plain index fully. Built as li
 
 SPEC 3.2 specifies a trigger on UPDATE and DELETE. `seed --reset` needs TRUNCATE, so it is left
 open. Application roles in a real deployment would not be granted TRUNCATE (see KNOWN_LIMITATIONS later).
+
+## 12. "Unread" is tracked by event id, not version (migration 0002)
+
+`item_reads.last_read_version` became `last_read_event_id bigint`. With decision 8 a comment does not
+change the version, so a version cannot tell a reader about new comments; an event id can. The
+migration renames and widens the column in place and converts existing values ("version V seen"
+becomes the newest event with `item_version <= V`; the downgrade maps back). Tested with data in
+`tests/db/test_migrations.py`. No foreign key to `item_events` was added: the SPEC lists a plain
+bigint, and the seed verifier checks that each marker belongs to its own item.

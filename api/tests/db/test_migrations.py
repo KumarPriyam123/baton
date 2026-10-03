@@ -94,6 +94,72 @@ async def test_upgrade_is_a_no_op_when_already_at_head(scratch_url: str) -> None
     assert await _snapshot(scratch_url) == before
 
 
+async def _seed_old_style_reads(url: str) -> tuple[list[int], uuid.UUID]:
+    """At revision 0001: an item with events at versions 1, 2, 2, 3, read up to version 2."""
+    conn = await asyncpg.connect(asyncpg_dsn(url))
+    try:
+        user = await conn.fetchval(
+            "INSERT INTO users (email, name, password_hash) "
+            "VALUES ('r@x.test', 'R', 'h') RETURNING id"
+        )
+        team = await conn.fetchval(
+            "INSERT INTO teams (key, name) VALUES ('PAY', 'Pay') RETURNING id"
+        )
+        item = await conn.fetchval(
+            "INSERT INTO work_items (key, team_id, number, origin_team_id, type, title, priority, "
+            "requester_id, confidential, requires_approval) "
+            "VALUES ('PAY-1', $1, 1, $1, 'incident', 'Something broke', 2, $2, false, false) "
+            "RETURNING id",
+            team,
+            user,
+        )
+        ids = []
+        for kind, version in (
+            ("created", 1),
+            ("assigned", 2),
+            ("status_changed", 2),
+            ("commented", 3),
+        ):
+            ids.append(
+                await conn.fetchval(
+                    "INSERT INTO item_events (item_id, team_id, kind, item_version) "
+                    "VALUES ($1, $2, $3, $4) RETURNING id",
+                    item,
+                    team,
+                    kind,
+                    version,
+                )
+            )
+        await conn.execute(
+            "INSERT INTO item_reads (user_id, item_id, last_read_version) VALUES ($1, $2, 2)",
+            user,
+            item,
+        )
+        return ids, item
+    finally:
+        await conn.close()
+
+
+async def _read_marker(url: str, column: str) -> object:
+    conn = await asyncpg.connect(asyncpg_dsn(url))
+    try:
+        return await conn.fetchval(f"SELECT {column} FROM item_reads")  # noqa: S608
+    finally:
+        await conn.close()
+
+
+async def test_item_reads_converts_between_versions_and_event_ids(scratch_url: str) -> None:
+    await _alembic("upgrade", scratch_url, "0001")
+    event_ids, _ = await _seed_old_style_reads(scratch_url)
+
+    await _alembic("upgrade", scratch_url, "0002")
+    # "seen version 2" becomes the newest event written at or before version 2
+    assert await _read_marker(scratch_url, "last_read_event_id") == event_ids[2]
+
+    await _alembic("downgrade", scratch_url, "0001")
+    assert await _read_marker(scratch_url, "last_read_version") == 2
+
+
 def test_there_is_exactly_one_migration_head(test_database_url: str) -> None:
     script = ScriptDirectory.from_config(alembic_config(test_database_url))
     assert len(script.get_heads()) == 1

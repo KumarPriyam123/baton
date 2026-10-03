@@ -182,7 +182,7 @@ item_reads = sa.Table(
     metadata,
     sa.Column("user_id", pg.UUID(as_uuid=True), sa.ForeignKey("users.id"), primary_key=True),
     sa.Column("item_id", pg.UUID(as_uuid=True), sa.ForeignKey("work_items.id"), primary_key=True),
-    sa.Column("last_read_version", sa.Integer, nullable=False),
+    sa.Column("last_read_event_id", sa.BigInteger, nullable=False),
     sa.Column("read_at", sa.DateTime(timezone=True), nullable=False, server_default=_now()),
 )
 

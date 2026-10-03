@@ -348,7 +348,7 @@ Also: a test helper that replays seeded histories through workflow.evaluate.
 Implement SPEC §7, the search part of §8, and these endpoints from §11: comments, watch, read, me/attention, me/notifications (+ read), items/similar, stats/teams, decisions.
 
 - Comments: idempotency key required; append-only; writes a `commented` event (data: comment_id) via record_event; the author auto-watches.
-- item_reads: POST /items/{key}/read upserts last_read_version; item DTO includes unread_since_version for the caller.
+- item_reads: POST /items/{key}/read upserts last_read_event_id (the item's current last_event_id); item DTO includes unread_since_event_id (the caller's last_read_event_id, null if never opened).
 - Attention: one indexed query per section with LIMIT, counts capped at 100.
 - Search: key-shaped q → exact key; else websearch_to_tsquery + ts_rank, plus trigram similarity on title; top 50; visibility applied INSIDE the query.
 - Similar: trigram similarity > 0.35, open items in the same team, top 5.

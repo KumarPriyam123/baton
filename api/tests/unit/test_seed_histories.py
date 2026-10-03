@@ -22,12 +22,24 @@ def build(seed: int) -> g.Dataset:
 
 @pytest.mark.parametrize("seed", [1, 2, 3, 7, 42, 2026])
 def test_every_item_of_a_demo_seed_replays_to_its_stored_state(seed: int) -> None:
-    items, events, approvals = records_from_dataset(build(seed))
+    items, events, approvals, reads = records_from_dataset(build(seed))
 
-    problems = [p for i in items for p in check_item(items[i], events[i], approvals[i])]
+    problems = [p for i in items for p in check_item(items[i], events[i], approvals[i], reads[i])]
 
     assert problems == []
     assert len(items) == 600
+
+
+def test_read_markers_point_at_events_of_the_same_item() -> None:
+    items, events, _, reads = records_from_dataset(build(3))
+
+    markers = [(i, r["last_read_event_id"]) for i in items for r in reads[i]]
+
+    assert len(markers) > 300
+    for item_id, marker in markers:
+        assert marker in {e["id"] for e in events[item_id]}
+    behind = sum(marker != events[i][-1]["id"] for i, marker in markers)
+    assert behind > 0  # some items have news since the reader last looked
 
 
 def test_the_same_seed_and_time_give_identical_data() -> None:
@@ -66,6 +78,7 @@ def test_the_baseline_history_is_valid() -> None:
 
 def corrupt(change: str) -> list[str]:
     item, events, approvals = copy.deepcopy(valid_history())
+    reads: list[dict[str, Any]] = []
     if change == "missing_event":
         del events[2]
     elif change == "version_gap":
@@ -99,9 +112,11 @@ def corrupt(change: str) -> list[str]:
         events.append({**events[-1], "kind": "sla_breached", "id": 99, "actor_id": REQUESTER})
     elif change == "approval_status":
         approvals[0]["status"] = "pending"
+    elif change == "read_marker_of_another_item":
+        reads.append({"user_id": REQUESTER, "last_read_event_id": 987_654})
     else:
         raise AssertionError(change)
-    return check_item(item, events, approvals)
+    return check_item(item, events, approvals, reads)
 
 
 @pytest.mark.parametrize(
@@ -119,6 +134,7 @@ def corrupt(change: str) -> list[str]:
         "wrong_team_stamp",
         "system_event_with_actor",
         "approval_status",
+        "read_marker_of_another_item",
     ],
 )
 def test_verifier_reports_corruption(change: str) -> None:

@@ -85,7 +85,9 @@ APPROVAL_COLS = [
     "invalidated_reason",
 ]
 WATCHER_COLS = ("item_id", "user_id", "created_at")
-READ_COLS = ("user_id", "item_id", "last_read_version", "read_at")
+# last_read_event_id holds the event's 1-based position in Dataset.events; load.py turns it
+# into an id.
+READ_COLS = ("user_id", "item_id", "last_read_event_id", "read_at")
 SIMILAR_COLS = ("item_id", "similar_item_id", "score", "created_at")
 
 
@@ -324,6 +326,7 @@ def _items(
     viewer_watchers = _named_viewers(data, teams)
     event_rows: list[tuple[datetime, int, tuple[object, ...]]] = []
     seq = 0
+    read_seqs: list[tuple[uuid.UUID, uuid.UUID, int, datetime]] = []
 
     for plan in plans:
         team = plan.team
@@ -375,10 +378,12 @@ def _items(
 
         candidates.append((sim.id, sim.key, sim.title))
         by_team.setdefault(team.id, []).append(sim.id)
-        seq = _emit_rows(rng, data, sim, event_rows, seq, viewer_watchers)
+        seq = _emit_rows(rng, data, sim, event_rows, seq, viewer_watchers, read_seqs)
 
     event_rows.sort(key=lambda r: (r[0], r[1]))
     data.events = [row for _, _, row in event_rows]
+    position = {event_seq: n for n, (_, event_seq, _) in enumerate(event_rows, start=1)}
+    data.reads = [(user, item, position[s], at) for user, item, s, at in read_seqs]
     data.comments.sort(key=lambda r: cast(datetime, r[3]))
 
 
@@ -405,6 +410,7 @@ def _emit_rows(
     event_rows: list[tuple[datetime, int, tuple[object, ...]]],
     seq: int,
     viewer_watchers: dict[uuid.UUID, list[uuid.UUID]],
+    read_seqs: list[tuple[uuid.UUID, uuid.UUID, int, datetime]],
 ) -> int:
     data.items.append(
         (
@@ -417,6 +423,7 @@ def _emit_rows(
             sim.resolved_at, sim.closed_at,
         )
     )  # fmt: skip
+    first_seq = seq + 1
     for e in sim.events:
         seq += 1
         row = (
@@ -444,13 +451,22 @@ def _emit_rows(
     for sim_other, score in sim.similar:
         data.similar.append((sim.id, sim_other, score, sim.created_at + timedelta(seconds=60)))
 
-    _reads(rng, data, sim)
+    _reads(rng, data, sim, first_seq, read_seqs)
     return seq
 
 
-def _reads(rng: random.Random, data: Dataset, sim: ItemSim) -> None:
-    """item_reads: who last looked at which version ("updated since you looked")."""
-    at_version = {e.version: e.at for e in sim.events}
+def _reads(
+    rng: random.Random,
+    data: Dataset,
+    sim: ItemSim,
+    first_seq: int,
+    read_seqs: list[tuple[uuid.UUID, uuid.UUID, int, datetime]],
+) -> None:
+    """item_reads: the newest event each person had seen when they last opened the item.
+
+    Anything after it is "updated since you looked". Events are identified by their emission
+    sequence here; _items() swaps in their final position once all events are sorted.
+    """
     readers = [(sim.requester, 0.8)]
     if sim.assignee is not None and sim.assignee != sim.requester:
         readers.append((sim.assignee, 0.9))
@@ -458,6 +474,6 @@ def _reads(rng: random.Random, data: Dataset, sim: ItemSim) -> None:
         if rng.random() > probability:
             continue
         behind = 0 if rng.random() < 0.6 else rng.randint(1, 3)
-        seen = max(1, sim.version - behind)
-        read_at = min(at_version[seen] + timedelta(seconds=5), data.now)
-        data.reads.append((uid, sim.id, seen, read_at))
+        index = max(0, len(sim.events) - 1 - behind)
+        read_at = min(sim.events[index].at + timedelta(seconds=5), data.now)
+        read_seqs.append((uid, sim.id, first_seq + index, read_at))

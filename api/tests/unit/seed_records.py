@@ -11,6 +11,7 @@ Records = tuple[
     dict[uuid.UUID, dict[str, Any]],
     dict[uuid.UUID, list[dict[str, Any]]],
     dict[uuid.UUID, list[dict[str, Any]]],
+    dict[uuid.UUID, list[dict[str, Any]]],
 ]
 
 
@@ -28,7 +29,11 @@ def records_from_dataset(ds: g.Dataset) -> Records:
     for row in ds.approvals:
         approval: dict[str, Any] = dict(zip(g.APPROVAL_COLS, row, strict=True))
         approvals[approval["item_id"]].append(approval)
-    return items, events, approvals
+    reads: dict[uuid.UUID, list[dict[str, Any]]] = {i: [] for i in items}
+    for row in ds.reads:
+        read: dict[str, Any] = dict(zip(g.READ_COLS, row, strict=True))
+        reads[read["item_id"]].append(read)
+    return items, events, approvals, reads
 
 
 def records_from_sim(
