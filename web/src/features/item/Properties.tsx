@@ -3,7 +3,7 @@
  * rolls back with a reason if the server says no (DESIGN §6.1). Everything else is read-only
  * here. A field that just changed under you fades from --dispatch-wash.
  */
-import { Eye, EyeOff, Lock } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -274,12 +274,6 @@ export function Properties({
         </Row>
         <Row label="Type" changed={changedFields.has("type")}>
           {TYPE_LABEL[item.type]}
-          {item.confidential && (
-            <span className="inline-flex items-center gap-1 text-meta text-pencil">
-              <Lock className="size-3.5" strokeWidth={1.75} aria-hidden />
-              Confidential
-            </span>
-          )}
         </Row>
         <Row label="Needs approval">{item.requires_approval ? "Yes" : "No"}</Row>
         {item.resolution && <Row label="Resolution">{RESOLUTION_LABEL[item.resolution]}</Row>}

@@ -11,6 +11,7 @@ import { Lock, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 
+import { keys } from "../../api/keys";
 import { useEvents, useItem, useMe } from "../../api/queries";
 import { Avatar } from "../../components/ui/Avatar";
 import { PriorityGlyph } from "../../components/ui/PriorityGlyph";
@@ -115,6 +116,7 @@ function Gone({ itemKey }: { itemKey: string }) {
 }
 
 function Loaded({ item, onClose }: { item: ItemOut; onClose: () => void }) {
+  const qc = useQueryClient();
   const me = useMe();
   const now = useNow();
   const timeline = useRef<TimelineHandle>(null);
@@ -142,6 +144,15 @@ function Loaded({ item, onClose }: { item: ItemOut; onClose: () => void }) {
     return out.sort((a, b) => a.id - b.id);
   }, [eventsQuery.data]);
   const names = useNames(item, events);
+
+  // A new event on the item (my own action, or a poll that found someone else's) means the
+  // timeline and the handoff track are behind: refetch them now instead of waiting for a poll.
+  const lastSeenEvent = useRef(item.last_event_id);
+  useEffect(() => {
+    if (lastSeenEvent.current === item.last_event_id) return;
+    lastSeenEvent.current = item.last_event_id;
+    void qc.invalidateQueries({ queryKey: keys.events(item.key) });
+  }, [qc, item.key, item.last_event_id]);
 
   // --- unread: remember what was unread when it opened, then tell the server it was seen ---
   const markRead = useCommand<undefined, ItemOut>({

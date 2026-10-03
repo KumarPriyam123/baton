@@ -118,7 +118,7 @@ export function useMembers(teamKey: string | undefined) {
     queryFn: () =>
       unwrap(
         api.GET("/api/v1/teams/{key}/members", {
-          params: { path: { key: teamKey ?? "" }, query: { limit: 100 } },
+          params: { path: { key: teamKey ?? "" }, query: { limit: 50 } },
         }),
       ),
     enabled: teamKey !== undefined,

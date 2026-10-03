@@ -101,7 +101,12 @@ export function ActionBar({
         }}
       >
         <PopoverAnchor asChild>
-          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Actions">
+          <div
+            className="flex flex-wrap items-center gap-2"
+            role="group"
+            aria-label="Actions"
+            data-popover-anchor
+          >
             {model.primary && button(model.primary, "primary")}
             {model.beside.map((spec) => button(spec, "secondary"))}
             {model.more.length > 0 && (
@@ -129,7 +134,10 @@ export function ActionBar({
           </div>
         </PopoverAnchor>
         {form?.form && (
-          <PopoverContent label={form.form.title}>
+          <PopoverContent
+            label={form.form.title}
+            onInteractOutside={(target) => target.closest("[data-popover-anchor]") !== null}
+          >
             <ActionForm
               key={form.action}
               spec={form}

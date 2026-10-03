@@ -117,10 +117,10 @@ function SegmentView({
       <div
         aria-hidden
         className={cn(
-          "w-full rounded-full",
+          "w-full",
           !owned && "h-0 border-t-2 border-dashed border-pencil",
-          owned && !live && "h-0.5 bg-pencil",
-          owned && live && "h-1 bg-dispatch",
+          owned && !live && "h-0.5 rounded-full bg-pencil",
+          owned && live && "h-1 rounded-full bg-dispatch",
         )}
       />
       {segment.collapsed === 0 && (

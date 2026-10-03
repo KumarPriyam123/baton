@@ -14,12 +14,15 @@ export function PopoverContent({
   className,
   label,
   align = "start",
+  onInteractOutside,
 }: {
   children: ReactNode;
   className?: string;
   /** Accessible name of the panel. */
   label: string;
   align?: "start" | "center" | "end";
+  /** Return true for targets that must not close it (the control that opened it). */
+  onInteractOutside?: (target: HTMLElement) => boolean;
 }) {
   return (
     <RadixPopover.Portal>
@@ -28,6 +31,12 @@ export function PopoverContent({
         align={align}
         sideOffset={8}
         collisionPadding={12}
+        onInteractOutside={(event) => {
+          // A menu that just closed hands focus back to its trigger; that must not close this.
+          if (event.target instanceof HTMLElement && onInteractOutside?.(event.target)) {
+            event.preventDefault();
+          }
+        }}
         className={cn(
           "float-in z-50 w-[min(360px,calc(100vw-24px))] rounded-panel border border-rule bg-sheet p-4 shadow-float",
           className,
