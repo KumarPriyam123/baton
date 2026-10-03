@@ -24,6 +24,17 @@ Status: ☐ not started · ◐ built, proof pending · ☑ proven
 | Demo seed under 30 s via `docker compose up`; large seed under 5 min | ☑ | From `down -v`: stack up in 21 s including builds, seed 1.37 s. Large: 69 s wall (`seed_done` 61 s). Idempotent: a second `up` logs `seed_skipped`. |
 | 20 random seeded items have valid histories | ☑ | `seed` verifies 20 after loading; `verify_seed` replayed all 600 demo and all 50,000 large histories: 0 problems (17 s for the large set). `tests/unit/test_seed_histories.py`: 6 seeds x 600 histories, 13 kinds of corruption reported. |
 
+## Phase 2: identity, sessions, authorization, visibility (carries T1-T4, G4, G6, CB6)
+
+| Done-when | Status | Proof |
+|---|---|---|
+| Every cell of SPEC 5.2 has a passing test | ☑ | `tests/unit/test_policy_matrix.py`: 11 scenarios x 25 actions x 9 personas (2,475 cells) typed by hand from the SPEC, plus team, organisation and combined-role rows. Hand sabotage: viewers allowed to claim turned 24 cells red. |
+| T-VIS parity passes for all demo users | ☑ | `tests/db/test_visibility_parity.py`: SQL clause equals `can_view` for all 24 demo users and 300 random role combinations over 600 items; counts agree; `LIMIT` applies after filtering; a clause that forgets confidentiality is detected. |
+| A confidential Compliance item is 404 to a non-lead member and in no list | ◐ policy and SQL level proven; HTTP level in phase 3 | `can()` returns `NOT_FOUND` and the clause excludes the item for farah (5+ hidden items, in lists and counts). There is no item endpoint yet; the HTTP-level test is a phase 3 Done-when. |
+| The CSRF test covers every unsafe route in OpenAPI | ☑ | `tests/integration/test_csrf.py` reads `/api/openapi.json`; a route added inside the test is protected without touching the middleware. Hand sabotage (check returns True): 6 tests red. |
+
+Also proven: sessions (hash only stored, idle expiry, deactivation and role changes apply at once, logout kills the token), throttling (6th attempt 429, same answer for unknown email), every SPEC 12 code, membership rules, `/readyz`. CI: https://github.com/KumarPriyam123/baton/actions/runs/37130018097 (2,853 API + 4 web tests).
+
 ## The situation (pain points the product must fix)
 
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
@@ -54,9 +65,9 @@ Status: ☐ not started · ◐ built, proof pending · ☑ proven
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
 |---|---|---|---|---|---|
 | T1 | Multiple teams; a user may be in several with different responsibilities | memberships with a role per team | 1, 2 | policy matrix tests | ◐ phase 1: `memberships`, demo personas hold different roles in different teams; policy tests in phase 2 |
-| T2 | Not every user can perform every action | permission matrix SPEC §5.2 | 2, 4 | policy matrix tests | ☐ |
-| T3 | Meaningful authorization model | team roles + resource rules (requester, assignee, confidential, four-eyes) | 2, 4 | policy matrix; T-VIS | ☐ |
-| T4 | Enforced by the system, not only by hiding UI controls | server policy + SQL visibility clause; 404 for invisible | 2, 5, 11 | T-VIS; E2E viewer direct API 403 | ☐ |
+| T2 | Not every user can perform every action | permission matrix SPEC §5.2 | 2, 4 | policy matrix tests | ◐ phase 2: the full matrix is proven in the policy module; endpoints enforce it as they are built (3, 4) |
+| T3 | Meaningful authorization model | team roles + resource rules (requester, assignee, confidential, four-eyes) | 2, 4 | policy matrix; T-VIS | ◐ phase 2: policy matrix and T-VIS parity proven; four-eyes decided with the approval workflow in phase 4 |
+| T4 | Enforced by the system, not only by hiding UI controls | server policy + SQL visibility clause; 404 for invisible | 2, 5, 11 | T-VIS; E2E viewer direct API 403 | ◐ phase 2: server-side policy, SQL clause, 403 on membership routes, CSRF, sessions; item and list endpoints in 3 and 5 |
 
 ## Collaboration and history
 
@@ -108,9 +119,9 @@ Status: ☐ not started · ◐ built, proof pending · ☑ proven
 | G1 | Data modelling | SPEC §3; constraints; event log | schema tests; Decision #5 | ◐ phase 1: schema, 28 named guards, index inventory, drift tests proven; the write-up (Decision #5) in phase 14 |
 | G2 | API design | commands vs PATCH, ETag/If-Match, problem+json, idempotency, keyset cursors | OpenAPI; Decision #3 | ☐ |
 | G3 | Frontend state management | TanStack Query, version merge, mutation scopes, rebase | vitest suite | ☐ |
-| G4 | Authorization | policy + visibility clause | policy matrix; T-VIS | ☐ |
+| G4 | Authorization | policy + visibility clause | policy matrix; T-VIS | ☑ phase 2 (policy matrix, T-VIS parity; per-endpoint enforcement is tracked under T2-T4) |
 | G5 | Concurrent operations | CB1–CB3, CB5 | concurrency tests | ☐ |
-| G6 | Error handling | SPEC §12 mapping; timeouts; retries; designed error states | failure drills | ☐ |
+| G6 | Error handling | SPEC §12 mapping; timeouts; retries; designed error states | failure drills | ◐ phase 2: every §12 code as problem+json, no leaked internals; timeouts and retries in phase 3 |
 | G7 | Data consistency | single transaction per command; outbox; DB constraints | event invariant; rollback test | ◐ phase 1: DB constraints and triggers proven; transactions and outbox in phases 3 and 6 |
 | G8 | Search and filtering | FTS + trigram + facets + URL filters | search tests | ☐ |
 | G9 | Application performance | indexes, budgets, virtualisation | PERFORMANCE.md | ☐ |
@@ -126,7 +137,7 @@ Status: ☐ not started · ◐ built, proof pending · ☑ proven
 | CB3 | Preventing accidental duplicate operations | idempotency keys | T-IDEM | ☐ |
 | CB4 | Enforcing workflow rules | workflow module + DB constraints | T-FLOW | ☐ |
 | CB5 | (beyond the examples) approvals bound to content | subject hash + invalidation | T-APPROVE-RACE | ☐ |
-| CB6 | Authorization at the resource level | confidential, requester, four-eyes, 404 | T-VIS | ☐ |
+| CB6 | Authorization at the resource level | confidential, requester, four-eyes, 404 | T-VIS | ◐ phase 2: SQL and Python agree (T-VIS); the same property over list, search, count and stream results in phases 3 and 5 |
 | CB7 | Reliable asynchronous processing | outbox + SKIP LOCKED + idempotent handlers | T-OUTBOX | ☐ |
 | CB8 | Reconciling optimistic frontend state with server decisions | version merge, scopes, rebase, rollback | T-RECONCILE + E2E | ☐ |
 | CB-P | Be prepared to explain them | DEMO_SCRIPT.md | rehearsal done | ☐ |
@@ -142,7 +153,7 @@ Status: ☐ not started · ◐ built, proof pending · ☑ proven
 | D5 | Automated tests for important behaviour, reflecting the architecture's risks | `api/tests`, `web/src/**/*.test.ts`, `web/e2e`; `docs/TESTING.md` | ◐ phases 0-1: harness, fail-not-skip guard, database guards (253 tests: 249 api + 4 web) |
 | D6 | Brief description of known limitations | `docs/KNOWN_LIMITATIONS.md` | ☐ |
 | D7 | Architecture diagrams or extra docs (welcome) | `docs/ARCHITECTURE.md` | ☐ |
-| D8 | Important assumptions documented | README Assumptions (SPEC §1) | ☐ |
+| D8 | Important assumptions documented | README Assumptions (SPEC §1) | ◐ README Assumptions section holds A1-A14 as written in SPEC §1 |
 
 ## Final discussion (prepared in DEMO_SCRIPT.md)
 

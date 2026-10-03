@@ -271,6 +271,8 @@ Endpoints
 
 **Done when**
 - [ ] All tests above pass
+- [ ] **HTTP-level confidentiality:** `GET /items/{key}` returns 404 (not 403) to a non-lead member of a Compliance team for a confidential item, and the item is absent from `GET /items`, facets and search (phase 2 could only prove this at policy and SQL level; full-text search arrives in phase 5 and joins the same test then)
+- [ ] Membership and login commands run on `command_tx` (lock and statement timeouts, deadlock retry), as CLAUDE.md I5 requires
 - [ ] `/api/docs` shows every endpoint with typed request and response models
 - [ ] No `OFFSET` anywhere (`grep -rn "offset(" api/app` finds nothing in request paths)
 
@@ -329,6 +331,7 @@ Also: a test helper that replays seeded histories through workflow.evaluate.
 | approval check in resolve | T-FLOW (resolve rows) |
 
 **Done when**
+- [ ] Removing or demoting a team member unassigns their open items in the same transaction (SPEC 4.3b), replacing the phase 2 refusal in `app/services/teams.py` (ENGINEERING_DECISIONS 14)
 - [ ] All tests pass, and every sabotage row was observed red
 - [ ] `GET /items/{key}` returns correct `allowed_actions` and `next_step` for each demo persona on a sample of items
 - [ ] Independent review (see top of file) run and confirmed findings fixed
@@ -364,6 +367,7 @@ Implement SPEC §7, the search part of §8, and these endpoints from §11: comme
 - Query-count guard on attention and list.
 
 **Done when**
+- [ ] The confidential-item HTTP test from phase 3 also covers search (`q`), attention, stats, decisions and notifications
 - [ ] All tests pass on the demo seed
 - [ ] A lead and a member of Payments get different `stats/teams` numbers when confidential items exist, and both match what they can list
 

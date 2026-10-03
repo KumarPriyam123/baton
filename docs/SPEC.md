@@ -26,6 +26,8 @@ Each one goes into the README's Assumptions section, as written.
 | A10 | Desktop first (people at desks working queues); usable on tablet and phone for reading and quick actions. | Shapes layout density. |
 | A11 | Notifications are in-app only in v1. Email/Slack would be another consumer of the same outbox. | Async design already supports more channels. |
 | A12 | Compliance requests are **confidential** by default: inside the team, only leads, the owner and the requester can see them. | Gives authorization a real resource-level rule. |
+| A13 | Any signed-in user can list a team's members and search the user directory. | Needed for routing requests and for assignee and member pickers. |
+| A14 | Demo accounts and the shared demo password exist only for the demo seed, and are offered only when `DEMO_MODE=true`. | Real deployments have no well-known credentials; the API refuses demo mode in production. |
 
 ---
 

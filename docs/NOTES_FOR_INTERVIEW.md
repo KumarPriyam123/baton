@@ -111,6 +111,57 @@ Each entry: **problem → root cause → fix → lesson**.
 - Root cause: with `src = ["."]` it treated the local `alembic/` folder as first-party.
 - Fix: `known-third-party = ["alembic"]`.
 
+### Phase 2
+
+**1. An un-awaited coroutine failed two unrelated tests**
+- Problem: after I added `/readyz` tests, `test_every_item_of_a_demo_seed_replays_to_its_stored_state[1]` and `[2]` failed. They passed alone.
+- Root cause: my scratch-database helper called `asyncio.run` inside an async test, which raised and left a coroutine un-awaited. pytest runs with warnings as errors, and the "never awaited" warning is emitted when the garbage collector runs, during some other test.
+- Fix: an async variant of the helper (`ascratch_database`) that awaits everything.
+- Lesson: when an unrelated test starts failing in a full run but not alone, look for a leaked warning from an earlier failure before touching the failing test.
+
+**2. asyncpg guessed `text` for a parameter in a CASE**
+- Problem: the failed-login `UPDATE` returned 500: `column "locked_until" is of type timestamp with time zone but expression is of type text`.
+- Root cause: a bind parameter that appears only inside `CASE ... THEN $2 ELSE NULL` has no type context, so the driver infers `text`.
+- Fix: explicit casts (`CAST(:lock_until AS timestamptz)`, and the others).
+- Lesson: in hand-written SQL, cast parameters whose type the query does not reveal.
+
+**3. My hand-written matrix was wrong once, not the policy**
+- Problem: four cells of the "assigned to lead L" scenario failed: member A was expected to be allowed to block, unblock, resolve and request approval.
+- Root cause: I derived that scenario from the "assigned to A" one and forgot A is no longer the assignee. SPEC 5.2 says "Member: A", meaning the assignee only.
+- Fix: the expectation, not the code.
+- Lesson: when a hand-written expectation disagrees with the code, re-read the SPEC cell first; the point of typing the matrix by hand is that either side can be the wrong one.
+
+**4. A sabotage test that differed in two ways proved nothing**
+- Problem: "a clause that forgets confidentiality leaks exactly the confidential items" failed.
+- Root cause: my deliberately wrong clause also forgot the requester rule, so it differed from the real one in two respects.
+- Fix: the wrong clause now differs in exactly one thing, and the test also checks that every extra item is confidential.
+- Lesson: a negative test must change one variable.
+
+**5. Adding CSRF broke older tests, correctly**
+- Problem: `POST /_validate` and `DELETE /healthz` in the error tests started returning 403.
+- Root cause: the CSRF middleware runs before routing and authentication, so an unsafe request without the token never reaches validation or the 405 check. That is the intended behaviour (decision 18).
+- Fix: those tests now carry a CSRF cookie and header.
+- Lesson: a security check that sits in front of everything changes what every older test sees; say so in the decision log.
+
+**6. Broken intermediate commits**
+- Problem: my first commit of the auth work contained the final `main.py`, which imported modules added by the next two commits, so it did not build on its own.
+- Root cause: the script that was meant to write a reduced `main.py` failed silently, because Windows Python could not read a Git Bash `/tmp` path.
+- Fix: the commits were local, so I reset and redid them with repo-relative temp files. Each now builds on its own.
+- Lesson: check that every commit builds, not just the last one, and keep scratch files inside the repo directory.
+
+**7. An I3 gap found at close-out**
+- Problem: `count_open_items_owned` counts `work_items` without `visibility_clause()`.
+- Root cause: it is an integrity check (a hidden item must still block a removal), but the rule says every query that counts items uses the clause.
+- Fix: the exception is written into the function and proved by a test: everyone allowed to manage a team's members (its leads, admins) sees every item of that team.
+- Lesson: a rule with an exception needs the exception written down next to the code, with the reason it is safe.
+
+**8. Code generated through heredocs picked up bad escapes**
+- Problem: `"\%"` in generated Python raised `SyntaxWarning: invalid escape sequence`, and large heredocs failed to parse in Git Bash.
+- Fix: files are written with the Write tool; `python -W error -c "import module"` catches escapes.
+
+**9. Known limitation, not fixed: the lock reveals which emails exist**
+- Five failures lock a real account (429) while an unknown email always answers 401. Recorded in KNOWN_LIMITATIONS with what it would take (a `login_attempts` table or nginx rate limiting).
+
 ## Explain this phase
 
 ### Phase 0: foundation
@@ -139,3 +190,17 @@ Each entry: **problem → root cause → fix → lesson**.
 8. **Version semantics (decision 8).** `version` counts decision-relevant state only; comments and system events keep the current one, so a comment never makes another editor's `If-Match` stale. "Unread" is therefore an event id (`item_reads.last_read_event_id`).
 9. **Honest gaps.** TRUNCATE is not covered by the append-only trigger (KNOWN_LIMITATIONS); the seed writes `work_items` directly (decision 7); the `COALESCE(due_at)` index question waits for `EXPLAIN` (decision 10).
 10. **Numbers.** 249 API + 4 web tests, none skipped. Demo seed 1.4 s; large seed 69 s wall time.
+
+
+### Phase 2: identity, sessions, authorization, visibility
+
+1. **What was built.** Sign-in with server-side sessions, CSRF protection on every unsafe request, login throttling, an actor context read fresh from the database on every request, one pure authorization module, problem+json errors, `/readyz`, and the team, member and directory endpoints.
+2. **Key decision: authorization lives in one pure module, in two forms that must agree.** `can()` answers "may this person do this to this item" (`api/app/domain/policy.py:193`); `can_view()` answers "may they see it" for one item (`:157`); `visibility_clause()` is the same rule as SQL for every query that returns or counts items (`:170`). The state-dependent cells of SPEC 5.2 are in `_can_item` (`:224`).
+3. **Alternative.** Check permissions in each endpoint, or filter lists in Python after the query. Simpler to write, but each endpoint can forget, and filtering after `LIMIT` gives short pages and leaks counts.
+4. **How agreement is proved.** `tests/db/test_visibility_parity.py:79` (T-VIS) compares the SQL clause with `can_view` for all 24 demo users and 300 random role combinations. `tests/unit/test_policy_matrix.py:254` checks all 2,475 cells of SPEC 5.2, typed by hand.
+5. **What breaks if the main guard is removed.** Drop the confidentiality term from `visibility_clause` and farah (a Compliance member) can list confidential items she does not own: the parity test goes red and names the leaked items. Let viewers claim in `can()` and 24 matrix cells go red (both done by hand).
+6. **Not visible means 404, never 403.** `can()` returns `NOT_FOUND` before it looks at the action, so a forbidden request cannot reveal that a hidden item exists. The HTTP-level proof comes with the item endpoints in phase 3.
+7. **Roles are never in the cookie.** `load_actor_context` (`api/app/repo/users.py:15`) reads `memberships` on every request; the session stores only `sha256(token)` (`api/app/auth/sessions.py:33`). Removing a membership applies to the person's very next request (tested).
+8. **CSRF by method, not by route list.** `CsrfMiddleware` (`api/app/api/csrf.py:31`) guards POST, PUT, PATCH and DELETE except login, and runs before authentication (`api/app/main.py:40`). The test reads OpenAPI, so later routes are covered automatically.
+9. **Honest gaps.** The login lock reveals which emails exist; sessions have no absolute lifetime; membership removal is refused (not auto-unassigned) while the person owns open items until phase 4 (decision 14); the membership and login commands do not yet use `command_tx` (phase 3).
+10. **Numbers.** 2,853 API + 4 web tests, none skipped, about 70 s. The auth flow was also checked end to end through nginx.
