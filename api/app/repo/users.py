@@ -191,3 +191,56 @@ async def list_demo_users(conn: AsyncConnection, limit: int = 50) -> list[DemoUs
     for user_id, team_key, role in rows:
         by_user.setdefault(user_id, []).append((team_key, TeamRole(role)))
     return [DemoUserRecord(str(p.email), p.name, p.is_admin, by_user.get(p.id, [])) for p in people]
+
+
+@dataclass(frozen=True)
+class DirectoryEntry:
+    id: uuid.UUID
+    name: str
+    email: str
+
+
+def _like_pattern(q: str) -> str:
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+async def search_directory(
+    conn: AsyncConnection,
+    q: str | None,
+    *,
+    limit: int,
+    after: tuple[str, uuid.UUID] | None,
+) -> list[DirectoryEntry]:
+    """People a picker can offer: active users whose name or email contains `q`.
+
+    Keyset page ordered by (name, id), no OFFSET (CLAUDE.md I8). A `%` or `_` typed by the user
+    is matched literally, not as a wildcard.
+    """
+    u = schema.users.c
+    query = (
+        sa.select(u.id, u.name, u.email)
+        .where(u.deactivated_at.is_(None))
+        .order_by(u.name, u.id)
+        .limit(limit)
+    )
+    if q:
+        pattern = _like_pattern(q)
+        query = query.where(
+            sa.or_(
+                u.name.ilike(pattern, escape="\\"),
+                sa.cast(u.email, sa.Text).ilike(pattern, escape="\\"),
+            )
+        )
+    if after is not None:
+        query = query.where(sa.tuple_(u.name, u.id) > sa.tuple_(after[0], after[1]))
+    rows = await conn.execute(query)
+    return [DirectoryEntry(r.id, r.name, str(r.email)) for r in rows]
+
+
+async def user_exists(conn: AsyncConnection, user_id: uuid.UUID) -> bool:
+    u = schema.users.c
+    found = (
+        await conn.execute(sa.select(u.id).where(u.id == user_id, u.deactivated_at.is_(None)))
+    ).first()
+    return found is not None
