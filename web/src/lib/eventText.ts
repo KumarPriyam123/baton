@@ -136,6 +136,11 @@ const LAST_EVENT_PHRASE: Record<EventKind, string> = {
   duplicate_suggested: "found a possible duplicate",
 };
 
+/** The short verb phrase of an event kind: "approved this", "changed the priority". */
+export function eventPhrase(kind: EventKind): string {
+  return LAST_EVENT_PHRASE[kind];
+}
+
 export function lastEventSentence(event: {
   kind: EventKind;
   actor: { name: string } | null;

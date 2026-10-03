@@ -3,15 +3,21 @@ import {
   type QueryClient,
   keepPreviousData,
   useInfiniteQuery,
+  useMutation,
   useQuery,
+  useQueryClient,
 } from "@tanstack/react-query";
 
 import { ApiError, type ItemOut, api, unwrap } from "../lib/api";
+import type { components } from "./generated";
 import { type ListFilters, toFacetQuery, toListQuery } from "../lib/filters";
 import { mergeItem } from "../lib/itemCache";
+import { UNREAD_CAP } from "../lib/notifications";
 import { keys } from "./keys";
 
 export const PAGE_SIZE = 50;
+
+export type DecisionKind = components["schemas"]["EventKind"];
 
 export function useMe() {
   return useQuery({
@@ -33,6 +39,75 @@ export function useAttention() {
   return useQuery({
     queryKey: keys.attention,
     queryFn: () => unwrap(api.GET("/api/v1/me/attention")),
+  });
+}
+
+/** The dashboard (SPEC 7): one aggregate per team, refreshed every 30 s while it is on screen. */
+export function useTeamStats() {
+  return useQuery({
+    queryKey: keys.stats,
+    queryFn: () => unwrap(api.GET("/api/v1/stats/teams")),
+    refetchInterval: 30_000,
+  });
+}
+
+/** The decision log, newest first, a keyset page at a time (I8). Empty strings mean "any". */
+export function useDecisions(team: string, kind: string) {
+  return useInfiniteQuery({
+    queryKey: keys.decisions(team, kind),
+    queryFn: ({ pageParam }) =>
+      unwrap(
+        api.GET("/api/v1/decisions", {
+          params: {
+            query: {
+              limit: PAGE_SIZE,
+              ...(team ? { team } : {}),
+              ...(kind ? { kind: [kind as DecisionKind] } : {}),
+              ...(pageParam ? { cursor: pageParam } : {}),
+            },
+          },
+        }),
+      ),
+    initialPageParam: null as number | null,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** How many are unread: one more than the cap is fetched, so "20+" is known without counting. */
+export function useUnreadCount() {
+  return useQuery({
+    queryKey: keys.unreadCount,
+    queryFn: async () => {
+      const page = await unwrap(
+        api.GET("/api/v1/me/notifications", {
+          params: { query: { unread: true, limit: UNREAD_CAP + 1 } },
+        }),
+      );
+      return page.items.length;
+    },
+    refetchInterval: 20_000,
+  });
+}
+
+/** The popover's list: the latest 20, read and unread, fetched only while it is open. */
+export function useNotifications(enabled: boolean) {
+  return useQuery({
+    queryKey: keys.notifications,
+    queryFn: () =>
+      unwrap(api.GET("/api/v1/me/notifications", { params: { query: { limit: 20 } } })),
+    enabled,
+    refetchInterval: enabled ? 20_000 : false,
+  });
+}
+
+/** Marks some (`ids`) or all notifications read, then refreshes both notification queries. */
+export function useMarkRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { ids: number[]; all: false } | { all: true }) =>
+      unwrap(api.POST("/api/v1/me/notifications/read", { body })),
+    onSettled: () => qc.invalidateQueries({ queryKey: keys.notifications }),
   });
 }
 

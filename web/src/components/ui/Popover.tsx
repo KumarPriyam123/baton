@@ -14,6 +14,7 @@ export function PopoverContent({
   className,
   label,
   align = "start",
+  side = "bottom",
   onInteractOutside,
 }: {
   children: ReactNode;
@@ -21,6 +22,7 @@ export function PopoverContent({
   /** Accessible name of the panel. */
   label: string;
   align?: "start" | "center" | "end";
+  side?: "top" | "right" | "bottom" | "left";
   /** Return true for targets that must not close it (the control that opened it). */
   onInteractOutside?: (target: HTMLElement) => boolean;
 }) {
@@ -29,6 +31,7 @@ export function PopoverContent({
       <RadixPopover.Content
         aria-label={label}
         align={align}
+        side={side}
         sideOffset={8}
         collisionPadding={12}
         onInteractOutside={(event) => {

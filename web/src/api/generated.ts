@@ -170,6 +170,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/stats/teams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dashboard numbers per team
+         * @description Open items per team by status and priority, overdue, unowned, going quiet, the five oldest
+         *     and the busiest owners. Only items you may see are counted, so a lead and a member of the same
+         *     team can see different figures; each figure equals what the same person can list.
+         */
+        get: operations["get_team_stats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The decision log
+         * @description Events marked as decisions with their reasons, newest first: why was this decided?
+         *     Decisions about items you cannot see are left out.
+         */
+        get: operations["list_decisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/demo/users": {
         parameters: {
             query?: never;
@@ -815,6 +858,33 @@ export interface components {
              */
             requires_approval: boolean;
         };
+        /** DecisionOut */
+        DecisionOut: {
+            /**
+             * Id
+             * @description The event id.
+             */
+            id: number;
+            kind: components["schemas"]["EventKind"];
+            /** Reason */
+            reason: string | null;
+            /** Data */
+            data: {
+                [key: string]: unknown;
+            };
+            actor: components["schemas"]["PersonOut"] | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Item Key */
+            item_key: string;
+            /** Item Title */
+            item_title: string;
+            /** @description The team the item had after the decision. */
+            team: components["schemas"]["TeamRefOut"];
+        };
         /** DecisionRequest */
         DecisionRequest: {
             /**
@@ -827,6 +897,16 @@ export interface components {
              * @description Required to reject; optional to approve.
              */
             note?: string | null;
+        };
+        /** DecisionsPage */
+        DecisionsPage: {
+            /** Items */
+            items: components["schemas"]["DecisionOut"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for the next page, or null.
+             */
+            next_cursor: number | null;
         };
         /** DemoMembership */
         DemoMembership: {
@@ -1167,11 +1247,46 @@ export interface components {
              */
             next_cursor: number | null;
         };
+        /** OldestItemOut */
+        OldestItemOut: {
+            /** Key */
+            key: string;
+            /** Title */
+            title: string;
+            /** Priority */
+            priority: number;
+            status: components["schemas"]["ItemStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            assignee: components["schemas"]["PersonOut"] | null;
+        };
+        /** OrgStats */
+        OrgStats: {
+            /** Open */
+            open: number;
+            /** Overdue */
+            overdue: number;
+            /** Unowned */
+            unowned: number;
+            /** Going Quiet */
+            going_quiet: number;
+            /** Awaiting Approval */
+            awaiting_approval: number;
+        };
         /**
          * OutboxStatus
          * @enum {string}
          */
         OutboxStatus: "pending" | "done" | "dead";
+        /** OwnerLoadOut */
+        OwnerLoadOut: {
+            user: components["schemas"]["PersonOut"];
+            /** Open */
+            open: number;
+        };
         /**
          * PatchItemRequest
          * @description Send only the fields to change (SPEC 4.2). Needs `If-Match`.
@@ -1212,6 +1327,17 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** PriorityCounts */
+        PriorityCounts: {
+            /** P0 */
+            p0: number;
+            /** P1 */
+            p1: number;
+            /** P2 */
+            p2: number;
+            /** P3 */
+            p3: number;
+        };
         /** ReadyOut */
         ReadyOut: {
             /** Status */
@@ -1247,6 +1373,29 @@ export interface components {
             priority: number;
             /** Score */
             score: number;
+        };
+        /** StatsOut */
+        StatsOut: {
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** @description The sum over the teams listed, so it matches their rows. */
+            org: components["schemas"]["OrgStats"];
+            /** Teams */
+            teams: components["schemas"]["TeamStatsOut"][];
+        };
+        /** StatusCounts */
+        StatusCounts: {
+            /** New */
+            new: number;
+            /** In Progress */
+            in_progress: number;
+            /** Blocked */
+            blocked: number;
+            /** Awaiting Approval */
+            awaiting_approval: number;
         };
         /** TeamOut */
         TeamOut: {
@@ -1294,6 +1443,47 @@ export interface components {
          * @enum {string}
          */
         TeamRole: "viewer" | "member" | "lead";
+        /** TeamStatsOut */
+        TeamStatsOut: {
+            team: components["schemas"]["TeamRefOut"];
+            /**
+             * Open
+             * @description Items not resolved or closed that you may see.
+             */
+            open: number;
+            by_status: components["schemas"]["StatusCounts"];
+            by_priority: components["schemas"]["PriorityCounts"];
+            /**
+             * Overdue
+             * @description Open and past the due date (the queue's `overdue=true`).
+             */
+            overdue: number;
+            /**
+             * Unowned
+             * @description Open with no owner (the queue's `assignee=none`).
+             */
+            unowned: number;
+            /**
+             * Going Quiet
+             * @description In progress or blocked, no activity for 72 hours.
+             */
+            going_quiet: number;
+            /**
+             * Oldest
+             * @description The five oldest open items, oldest first.
+             */
+            oldest: components["schemas"]["OldestItemOut"][];
+            /**
+             * Owners
+             * @description The busiest owners by open items, at most 8.
+             */
+            owners: components["schemas"]["OwnerLoadOut"][];
+            /**
+             * Owners Total
+             * @description How many people own at least one open item here.
+             */
+            owners_total: number;
+        };
         /** TransferRequest */
         TransferRequest: {
             /** Team Key */
@@ -1560,6 +1750,63 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MarkedRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_team_stats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatsOut"];
+                };
+            };
+        };
+    };
+    list_decisions: {
+        parameters: {
+            query?: {
+                /** @description Team key */
+                team?: string | null;
+                /** @description Repeat to match any of several decision kinds */
+                kind?: components["schemas"]["EventKind"][] | null;
+                /** @description `next_cursor` of the last page */
+                cursor?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecisionsPage"];
                 };
             };
             /** @description Validation Error */
