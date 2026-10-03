@@ -70,3 +70,16 @@ phase 12 measures (ENGINEERING_DECISIONS 32).
 
 A client that was offline through more than 100 versioned changes gets the first 100 plus the item as
 it is now, which is what the conflict dialog needs. It is not a history view (use the events endpoint).
+
+## A command is authorised with the roles read when its request began
+
+`current_actor` reads memberships once per request, before the command transaction. If a lead is
+demoted while their PATCH waits (at most the 2 s lock timeout), that PATCH is still judged with the
+old role. The next request sees the change (SPEC 5.3 holds). Re-reading the role after the lock would
+close the window for one extra query per command.
+
+## A replayed 412 can outlive the reason it was a 412
+
+An idempotency key stores a 412 for 24 h and `If-Match` is not part of the fingerprint
+(ENGINEERING_DECISIONS 34). A client that rebases and re-sends under the same key is told the old
+answer. The web client must create a new key whenever the request changes.

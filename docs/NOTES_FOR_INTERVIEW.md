@@ -162,6 +162,56 @@ Each entry: **problem → root cause → fix → lesson**.
 **9. Known limitation, not fixed: the lock reveals which emails exist**
 - Five failures lock a real account (429) while an unknown email always answers 401. Recorded in KNOWN_LIMITATIONS with what it would take (a `login_attempts` table or nginx rate limiting).
 
+### Phase 3
+
+**1. The first list query decorated every row before it sorted and limited**
+- Problem: on the large seed (50,000 items) the default list took 20-110 ms and EXPLAIN showed a sequential scan of `work_items` and of `approvals`.
+- Root cause: the query joined teams, users, the newest approval (LATERAL) and the last event onto the whole table, then sorted and cut 51 rows.
+- Fix: an inner query filters, orders and limits `work_items` alone; the joins run on the 51 rows of the page (`repo/items.py` `_page` and `_item_query`). 3-12 ms for leads and members.
+- Lesson: look at the plan on the big data before trusting a query that "works". The admin's unfiltered list still sorts the whole table; the expression indexes of decision 10 are the phase 12 fix.
+
+**2. A dependency argument named `key` broke the whole app at import**
+- Problem: `AssertionError: Path parameters cannot have default values` when the app started.
+- Root cause: the `Idempotency-Key` header dependency had a parameter called `key`, and `PATCH /items/{key}` has a path parameter with the same name; FastAPI merged them.
+- Fix: the header parameters are called `idempotency_key`.
+- Lesson: parameter names in dependencies share one namespace with the path.
+
+**3. Two guards doing the same job hid a sabotage result**
+- Problem: removing the version comparison in the service left every T-STALE test green.
+- Root cause: `update_item` also has `WHERE version = :expected`, which returns no row and raises the same stale error.
+- Fix: none needed (the second check is intentional); the sabotage removes both and 7 tests go red (TESTING.md).
+- Lesson: when a sabotage check does not go red, find out whether the test is weak or the guard is doubled.
+
+**4. A failed login must commit its failure count before refusing**
+- Problem: moving login onto `command_tx` would have undone the count, because the refusal was an exception raised inside the transaction.
+- Fix: `services/auth.py` commits the count in `run_command`, then raises `Unauthenticated` outside it.
+- Lesson: an exception rolls back; a command that must record a failure and still fail has to leave the transaction first.
+
+**5. The OpenAPI test found real gaps**
+- Problem: no operation had a usable id (`list_items_api_v1_items_get`) and `/readyz` had no response model.
+- Fix: `generate_unique_id_function` returns the function name; `ReadyOut` model; the test now fails for any future route that lacks either.
+
+**6. A test expectation was wrong, not the code**
+- Problem: I expected the requester to be allowed `requires_approval_on`.
+- Root cause: SPEC 4.2 says turning it on is for the assignee or a lead; only an ops task requester may ask at creation.
+- Lesson: when a test and the code disagree, read the SPEC line before changing either.
+
+**7. My own tooling destroyed work twice**
+- Problem A: the sabotage script ran `git checkout -- file` while that file held uncommitted fixes; they were wiped, and the "sabotage" runs that followed were meaningless (they failed because the fix was gone).
+- Problem B: a Python script that opened a test file with `"w"` and then crashed on a lone surrogate left it empty.
+- Fix: restored from git and redone; since then, sabotage runs only on committed trees, and scripted writes go to a temp file and `os.replace`.
+- Lesson: commit before sabotaging; never truncate a file you have not finished producing.
+
+**8. The independent review found four defects and several untested paths in code I thought was done**
+- NUL or a lone surrogate in `reason` was a 500; `tx.now` was taken before waiting for the lock, so `updated_at` could go backwards; `record_event` trusted the caller's version; a hidden item was locked before it was checked, so a 503 could reveal it; and the retry, DBAPIError and cancellation paths had no direct test. All fixed (decision 34).
+- Lesson: ask the reviewer concrete questions with failure scenarios; it ran probes against Postgres, which found more than reading would.
+
+**9. The large seed overwrote the demo data**
+- Problem: `seed --size large --reset` TRUNCATEs what it reaches, and I pointed it at the dev database.
+- Fix: demo re-seeded; CLAUDE.md now says the large seed goes into `baton_large` only (and the procedure was run once to check it works).
+
+**10. Heredocs and quotes again** (see phase 2, problem 8): scripts with apostrophes failed to parse in Git Bash. Files and edits go through the Write and Edit tools.
+
 ## Explain this phase
 
 ### Phase 0: foundation
@@ -204,3 +254,17 @@ Each entry: **problem → root cause → fix → lesson**.
 8. **CSRF by method, not by route list.** `CsrfMiddleware` (`api/app/api/csrf.py:31`) guards POST, PUT, PATCH and DELETE except login, and runs before authentication (`api/app/main.py:40`). The test reads OpenAPI, so later routes are covered automatically.
 9. **Honest gaps.** The login lock reveals which emails exist; sessions have no absolute lifetime; membership removal is refused (not auto-unassigned) while the person owns open items until phase 4 (decision 14); the membership and login commands do not yet use `command_tx` (phase 3).
 10. **Numbers.** 2,854 API + 4 web tests, none skipped, about 70 s. The auth flow was also checked end to end through nginx.
+
+
+### Phase 3: work items core
+
+1. **What was built.** Create, read, edit, list, facets and history for items; the command transaction (`command_tx`/`run_command`), `record_event`, and the idempotency layer that every later command reuses; login, logout and membership moved onto the same transaction shape.
+2. **Key decision: the idempotency key lives in the command's own transaction.** The key is inserted first with `INSERT ... ON CONFLICT DO NOTHING` (`api/app/api/idempotency.py:150`). A concurrent request with the same key waits for that insert's transaction to finish, then replays the stored answer. There is no gap between "check" and "insert".
+3. **Alternative.** Check for the key (SELECT), then insert it, or keep keys in Redis or a separate transaction. Two requests can both pass the check, or the key and the item can disagree after a crash.
+4. **The savepoint.** The business logic runs inside `begin_nested()` (`idempotency.py:157`). A domain error (4xx) rolls back to the savepoint only, so the error answer is stored with the key and committed (`:159`; a database constraint that fires is translated at `:163`); anything else, including BUSY and any 5xx, rolls back the whole transaction, key row included, so the retry runs again.
+5. **The retry.** `run_command` (`api/app/db/tx.py:80`) runs `command_tx` up to 3 times; it restarts only on SQLSTATE 40001/40P01 (`tx.py:96`), and a fresh transaction means the key insert, the events, the outbox row and the NOTIFY are all redone from nothing, never doubled. `command_tx` (`:54`) sets `lock_timeout 2s` and `statement_timeout 5s` with `SET LOCAL` (`:67-68`); timeouts become 503 BUSY with `Retry-After`.
+6. **Stale writes.** The edit locks the row first (`repo/items.py:275`, `FOR UPDATE` at `:309`), judges permission, then compares the version (`services/items.py:258` raises `StaleVersion`); the UPDATE repeats `version = :expected` (`repo/items.py:373`). The 412 carries `current` and `changes_since` (the versioned events after the version the client held).
+7. **History.** Every change goes through `record_event` (`db/tx.py:130`): event, `last_event_id`, outbox row and NOTIFY together, and it refuses an item whose version differs from the row (`:185`). `tests/unit/test_single_writer.py` fails if any other module writes `work_items`, `item_events` or the outbox.
+8. **What breaks if the main guards go.** No `ON CONFLICT`: ten concurrent creates fail or double (T-IDEM red). No version checks: ten edits all succeed and lose each other (T-STALE red). No visibility clause: a Compliance member lists confidential items. No `COALESCE` in the cursor: items without a due date are skipped or repeated across pages.
+9. **Honest gaps.** A replayed 412 can outlive its reason because `If-Match` is not in the fingerprint (decision 34, open); material edits are refused while an approval is on record until phase 4 (decision 27); an admin's unfiltered list sorts the whole table (phase 12); old idempotency keys wait for the phase 6 cleanup.
+10. **Numbers.** 3,129 API + 4 web tests, none skipped, about 165 s. List 3-12 ms and facets 9-35 ms on 50,000 items for leads and members.

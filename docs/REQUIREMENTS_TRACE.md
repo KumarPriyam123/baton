@@ -30,10 +30,23 @@ Status: ☐ not started · ◐ built, proof pending · ☑ proven
 |---|---|---|
 | Every cell of SPEC 5.2 has a passing test | ☑ | `tests/unit/test_policy_matrix.py`: 11 scenarios x 25 actions x 9 personas (2,475 cells) typed by hand from the SPEC, plus team, organisation and combined-role rows. Hand sabotage: viewers allowed to claim turned 24 cells red. |
 | T-VIS parity passes for all demo users | ☑ | `tests/db/test_visibility_parity.py`: SQL clause equals `can_view` for all 24 demo users and 300 random role combinations over 600 items; counts agree; `LIMIT` applies after filtering; a clause that forgets confidentiality is detected. |
-| A confidential Compliance item is 404 to a non-lead member and in no list | ◐ policy and SQL level proven; HTTP level in phase 3 | `can()` returns `NOT_FOUND` and the clause excludes the item for farah (5+ hidden items, in lists and counts). There is no item endpoint yet; the HTTP-level test is a phase 3 Done-when. |
+| A confidential Compliance item is 404 to a non-lead member and in no list | ☑ policy and SQL (phase 2), HTTP (phase 3) | `can()` returns `NOT_FOUND` and the clause excludes the item for farah (5+ hidden items, in lists and counts). There is no item endpoint yet; the HTTP-level test is a phase 3 Done-when. |
 | The CSRF test covers every unsafe route in OpenAPI | ☑ | `tests/integration/test_csrf.py` reads `/api/openapi.json`; a route added inside the test is protected without touching the middleware. Hand sabotage (check returns True): 6 tests red. |
 
 Also proven: sessions (hash only stored, idle expiry, deactivation and role changes apply at once, logout kills the token), throttling (6th attempt 429, same answer for unknown email), every SPEC 12 code, membership rules, `/readyz`. CI: https://github.com/KumarPriyam123/baton/actions/runs/37130453803 (2,854 API + 4 web tests).
+
+## Phase 3: work items core (carries CB2, CB3, K3, K4, X2, C3, G2, G6, G7)
+
+| Done-when | Status | Proof |
+|---|---|---|
+| All listed tests pass | ☑ | **T-IDEM** `tests/concurrency/test_items_concurrency.py::test_ten_concurrent_creates_with_one_key_make_exactly_one_item_and_ten_equal_answers` (1 item, 10 equal bodies, 9 `Idempotent-Replayed`), different body 422, domain 4xx replayed, forced 5xx and BUSY not stored. **T-STALE** `::test_two_edits_on_the_same_version_at_once_one_wins_the_other_gets_412` (6 rounds; `changes_since` is exactly the winner's event), `::test_many_edits_on_one_version_at_once_exactly_one_wins`. 428: `test_items_patch.py::test_patch_without_if_match_is_428`. Event invariant: `::test_events_over_a_series_of_edits_have_contiguous_versions`, `::test_a_failed_edit_writes_no_event_and_no_outbox_row`. Pagination over 1,000 items, 4 sorts x 3 limits, ~20% null `due_at`, heavy ties: `test_items_list.py::test_walking_every_page_returns_each_visible_item_once_in_order_for_every_sort`. Filters: 16 cases x 3 people against hand-written SQL. Query count: `test_query_budget.py` (list 5 rows = 100 rows = filtered, at most 6 statements). |
+| HTTP-level confidentiality | ☑ (search joins in phase 5) | `test_items_create_read.py::test_confidential_item_is_404_for_a_non_lead_member_and_absent_from_list_and_facets`: 404 `NOT_FOUND` for a CMP member, 200 for the lead, an admin and the requester; absent from the list; facet totals equal the visible rows. Events follow the same rule (`test_items_events.py`). |
+| Membership and login run on `command_tx` | ☑ | `tests/integration/test_commands_use_command_tx.py` counts command transactions for login (success and failure), logout, add, change and remove member; two simultaneous identical adds give 201 and 200. |
+| `/api/docs` shows every endpoint with typed models | ☑ | `tests/unit/test_openapi.py`: unique operation ids (function names), every JSON response and request body has a schema, `If-Match` and `Idempotency-Key` documented, 412/428/409 listed on PATCH. Checked live through nginx on 8081. |
+| No `OFFSET` | ☑ | `grep -rn "offset(" api/app` finds nothing; `tests/unit/test_single_writer.py` scans for `.offset(` and raw `OFFSET`. |
+| Independent review | ☑ | ENGINEERING_DECISIONS 34: 4 findings fixed, 4 left with reasons, test gaps closed. |
+
+CI: https://github.com/KumarPriyam123/baton/actions (see HANDOFF for the run of `phase-3-done`). 3,129 API + 4 web tests, none skipped. EXPLAIN on the large seed: ENGINEERING_DECISIONS 32.
 
 ## The situation (pain points the product must fix)
 
@@ -44,7 +57,7 @@ Also proven: sessions (hash only stored, idle expiry, deactivation and role chan
 | S3 | Some require approval before they can move forward | approval gate on resolve, four-eyes, content-bound approvals | 4 | T-FLOW resolve rows; T-APPROVE-RACE | ☐ |
 | S4 | Ownership changes several times | claim / release / assign / transfer, each an event; handoff track | 4, 10 | event tests; HandoffTrack screenshot | ☐ |
 | S5 | Two people start on the same issue without realising | atomic claim; duplicate suggestions while typing and after creation | 4, 5, 6, 9 | T-CLAIM; similar-items test; E2E claim race | ☐ |
-| S6 | Someone changes a request while another views or edits an older version | versions + If-Match + `changes_since`; live updates; conflict dialog | 3, 7, 10 | T-STALE; E2E stale edit | ☐ |
+| S6 | Someone changes a request while another views or edits an older version | versions + If-Match + `changes_since`; live updates; conflict dialog | 3, 7, 10 | T-STALE; E2E stale edit | ◐ phase 3: versions, If-Match, `changes_since` proven (T-STALE); live updates and the dialog in 7 and 10 |
 | S7 | Important requests disappear in message threads | one queue per team; "Needs an owner"; "going quiet" detection | 5 | attention tests | ☐ |
 | S8 | Management can't see what's happening, who owns it, what needs attention, what changed, what's forgotten, or why a decision was made | dashboard; attention; activity timeline; "updated since you looked"; stale/overdue; decision log with required reasons | 5, 11 | stats/decisions tests; dashboard screenshot | ☐ |
 
@@ -52,13 +65,13 @@ Also proven: sessions (hash only stored, idle expiry, deactivation and role chan
 
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
 |---|---|---|---|---|---|
-| E1 | Create and manage work items for investigation, action or resolution | six item types with defaults; full lifecycle | 3, 4 | API tests; E2E create | ☐ |
+| E1 | Create and manage work items for investigation, action or resolution | six item types with defaults; full lifecycle | 3, 4 | API tests; E2E create | ◐ phase 3: create, read, edit, list with type defaults; workflow in phase 4 |
 | E2 | Understand what the item is and why it exists | title, description, type, requester, created context | 3, 10 | detail screenshot | ☐ |
 | E3 | Its current state and importance | status (shape + word), priority, SLA state | 3, 10 | detail screenshot | ☐ |
 | E4 | Who is responsible | owner + team, handoff track | 4, 10 | detail screenshot | ☐ |
-| E5 | What has happened previously | append-only timeline, decisions with reasons | 3, 5, 10 | event invariant test | ☐ |
-| E6 | What requires attention next | `next_step` on every item; Inbox sections | 4, 5, 9 | next_step tests | ☐ |
-| E7 | Different users on the same item at about the same time behave sensibly | CB1, CB2, CB3, CB5, CB8 | 3, 4, 10 | concurrency tests; two-user E2E | ☐ |
+| E5 | What has happened previously | append-only timeline, decisions with reasons | 3, 5, 10 | event invariant test | ◐ phase 3: every change is an event (`record_event`), timeline endpoint `GET /items/{key}/events`; comments in phase 5 |
+| E6 | What requires attention next | `next_step` on every item; Inbox sections | 4, 5, 9 | next_step tests | ◐ phase 3: `next_step` implemented (SPEC 4.5, unit-tested) and returned on every item; Inbox in 5 and 9 |
+| E7 | Different users on the same item at about the same time behave sensibly | CB1, CB2, CB3, CB5, CB8 | 3, 4, 10 | concurrency tests; two-user E2E | ◐ phase 3: CB2 and CB3 proven; CB1 and CB5 in phase 4 |
 
 ## Teams, identity and access
 
@@ -74,17 +87,17 @@ Also proven: sessions (hash only stored, idle expiry, deactivation and role chan
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
 |---|---|---|---|---|---|
 | C1 | Users collaborate around work items | comments, watchers, notifications | 5, 6, 10 | comment tests; E2E | ☐ |
-| C2 | Understand how an item evolved: responsibility, priority, workflow | typed events with from/to; handoff track; Decisions filter | 3, 4, 10 | event tests; screenshot | ☐ |
-| C3 | Important actions don't silently disappear | one write path (`record_event`), same transaction, append-only trigger, reasons required for decisions | 1, 3 | event invariant test; trigger test | ◐ phase 1: append-only trigger tested (UPDATE, DELETE, no-op rewrite); `record_event` and its tests in phase 3 |
+| C2 | Understand how an item evolved: responsibility, priority, workflow | typed events with from/to; handoff track; Decisions filter | 3, 4, 10 | event tests; screenshot | ◐ phase 3: typed events with from/to and reasons for decisions; handoff events in phase 4 |
+| C3 | Important actions don't silently disappear | one write path (`record_event`), same transaction, append-only trigger, reasons required for decisions | 1, 3 | event invariant test; trigger test | ◐ phases 1 and 3: append-only trigger; `record_event` writes event, stamp, outbox row and NOTIFY together; single-writer scan; the version check refuses a wrong version; reasons for priority lowering and approval off |
 
 ## Concurrent usage
 
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
 |---|---|---|---|---|---|
 | K1 | Two users try to take responsibility for the same work | atomic conditional claim | 4 | T-CLAIM; E2E claim race | ☐ |
-| K2 | One user views information another just changed | live updates; version guard; stale banner; If-Match on intent-dependent actions | 3, 7, 10 | SSE tests; E2E live update | ☐ |
-| K3 | Multiple updates within a short period | row lock + versions (no lost updates); per-item client mutation queue; event coalescing | 3, 9, 10 | T-STALE; vitest scope test | ☐ |
-| K4 | A user repeats an action, unsure if the first succeeded | idempotency keys in the same transaction; same key on retries | 3, 9 | T-IDEM; E2E double-submit | ☐ |
+| K2 | One user views information another just changed | live updates; version guard; stale banner; If-Match on intent-dependent actions | 3, 7, 10 | SSE tests; E2E live update | ◐ phase 3: ETag, version guard on the server side; SSE in phase 7 |
+| K3 | Multiple updates within a short period | row lock + versions (no lost updates); per-item client mutation queue; event coalescing | 3, 9, 10 | T-STALE; vitest scope test | ◐ phase 3: row lock + versions proven (10 edits on one version: 1 wins); client queue in 9 and 10 |
+| K4 | A user repeats an action, unsure if the first succeeded | idempotency keys in the same transaction; same key on retries | 3, 9 | T-IDEM; E2E double-submit | ◐ phase 3: T-IDEM proven on the server; client key per action in phase 9 |
 | K5 | Handle at least some deliberately | all four above | — | TESTING.md | ☐ |
 
 ## User experience
@@ -94,7 +107,7 @@ Also proven: sessions (hash only stored, idle expiry, deactivation and role chan
 | U1 | Useful overview of ongoing work | Inbox + Dashboard | 9, 11 | screenshots | ☐ |
 | U2 | Quickly see what requires attention | attention sections; next-step chips | 5, 9 | attention tests | ☐ |
 | U3 | Find relevant work without browsing everything | filters in URL, facets, full-text + fuzzy search, key jump, command palette | 5, 9 | search tests; E2E | ☐ |
-| U4 | Usable as stored work grows | keyset pagination, virtualised list, indexes, ranked search capped | 3, 9, 12 | PERFORMANCE.md on large seed | ☐ |
+| U4 | Usable as stored work grows | keyset pagination, virtualised list, indexes, ranked search capped | 3, 9, 12 | PERFORMANCE.md on large seed | ◐ phase 3: keyset pagination over 1,000 items, EXPLAIN on the large seed (decision 32); UI in 9, numbers in 12 |
 | U5 | Coherent, responsive experience over decorative UI | DESIGN.md principles; performance budgets; designed states | 8–11 | screenshots; axe; budgets | ☐ |
 
 ## System behaviour
@@ -109,7 +122,7 @@ Also proven: sessions (hash only stored, idle expiry, deactivation and role chan
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
 |---|---|---|---|---|---|
 | X1 | Thousands of users, hundreds to a few thousand simultaneous, many teams, tens of thousands of active items, large growing history | large seed (2,000 users, 40 teams, 50,000 items, ~600,000 events); bench with concurrent users | 1, 12 | PERFORMANCE.md | ◐ phase 1: large seed loads (2,000 users, 40 teams, 50,000 items of which 18,107 open, 586,983 events, 127,714 comments); benchmarks in phase 12 |
-| X2 | Must not load the entire dataset into the browser or application memory | keyset pagination everywhere, bounded queries, worker batches, bounded SSE queues | 3, 7, 9 | no-OFFSET check; query-plan test | ☐ |
+| X2 | Must not load the entire dataset into the browser or application memory | keyset pagination everywhere, bounded queries, worker batches, bounded SSE queues | 3, 7, 9 | no-OFFSET check; query-plan test | ◐ phase 3: no OFFSET anywhere (scan + grep), limit capped at 100, query counts do not grow with rows; UI in 9 |
 | X3 | Design for continued growth | scaling path in ARCHITECTURE.md (partitioning, replicas, sequences, search engine) | 14 | ARCHITECTURE.md | ☐ |
 
 ## Engineering expectations (the ten named areas)
@@ -117,12 +130,12 @@ Also proven: sessions (hash only stored, idle expiry, deactivation and role chan
 | ID | Area | Where it's shown | Proof | Status |
 |---|---|---|---|---|
 | G1 | Data modelling | SPEC §3; constraints; event log | schema tests; Decision #5 | ◐ phase 1: schema, 28 named guards, index inventory, drift tests proven; the write-up (Decision #5) in phase 14 |
-| G2 | API design | commands vs PATCH, ETag/If-Match, problem+json, idempotency, keyset cursors | OpenAPI; Decision #3 | ☐ |
+| G2 | API design | commands vs PATCH, ETag/If-Match, problem+json, idempotency, keyset cursors | OpenAPI; Decision #3 | ◐ phase 3: ETag/If-Match, problem+json, idempotency, keyset cursors, stable operation ids; commands in 4 |
 | G3 | Frontend state management | TanStack Query, version merge, mutation scopes, rebase | vitest suite | ☐ |
 | G4 | Authorization | policy + visibility clause | policy matrix; T-VIS | ☑ phase 2 (policy matrix, T-VIS parity; per-endpoint enforcement is tracked under T2-T4) |
-| G5 | Concurrent operations | CB1–CB3, CB5 | concurrency tests | ☐ |
-| G6 | Error handling | SPEC §12 mapping; timeouts; retries; designed error states | failure drills | ◐ phase 2: every §12 code as problem+json, no leaked internals; timeouts and retries in phase 3 |
-| G7 | Data consistency | single transaction per command; outbox; DB constraints | event invariant; rollback test | ◐ phase 1: DB constraints and triggers proven; transactions and outbox in phases 3 and 6 |
+| G5 | Concurrent operations | CB1–CB3, CB5 | concurrency tests | ◐ phase 3: CB2 and CB3 proven |
+| G6 | Error handling | SPEC §12 mapping; timeouts; retries; designed error states | failure drills | ◐ phases 2 and 3: every SPEC 12 code; lock/statement timeouts become 503 BUSY with Retry-After; deadlock retry; constraint violations become domain errors |
+| G7 | Data consistency | single transaction per command; outbox; DB constraints | event invariant; rollback test | ◐ phases 1 and 3: one transaction per command with the idempotency key inside it; outbox row in the same transaction; failed commands leave nothing; worker in 6 |
 | G8 | Search and filtering | FTS + trigram + facets + URL filters | search tests | ☐ |
 | G9 | Application performance | indexes, budgets, virtualisation | PERFORMANCE.md | ☐ |
 | G10 | Maintainability | pure domain modules, layered code, generated client, CI, docs | CI; layout | ◐ phase 0: layout, CI green (run 37122809241), pre-commit; domain modules and client later |
@@ -133,11 +146,11 @@ Also proven: sessions (hash only stored, idle expiry, deactivation and role chan
 | ID | Brief example | Baton | Test | Status |
 |---|---|---|---|---|
 | CB1 | Simultaneous actions by multiple users | atomic claim | T-CLAIM | ☐ |
-| CB2 | Handling stale information | versions + If-Match | T-STALE | ☐ |
-| CB3 | Preventing accidental duplicate operations | idempotency keys | T-IDEM | ☐ |
+| CB2 | Handling stale information | versions + If-Match | T-STALE | ◐ phase 3 proven (T-STALE); demo in 10 |
+| CB3 | Preventing accidental duplicate operations | idempotency keys | T-IDEM | ◐ phase 3 proven (T-IDEM); demo in 9 |
 | CB4 | Enforcing workflow rules | workflow module + DB constraints | T-FLOW | ☐ |
 | CB5 | (beyond the examples) approvals bound to content | subject hash + invalidation | T-APPROVE-RACE | ☐ |
-| CB6 | Authorization at the resource level | confidential, requester, four-eyes, 404 | T-VIS | ◐ phase 2: SQL and Python agree (T-VIS); the same property over list, search, count and stream results in phases 3 and 5 |
+| CB6 | Authorization at the resource level | confidential, requester, four-eyes, 404 | T-VIS | ◐ phases 2 and 3: SQL and Python agree (T-VIS); list, facets and events checked over HTTP; search, attention and notifications in phase 5 |
 | CB7 | Reliable asynchronous processing | outbox + SKIP LOCKED + idempotent handlers | T-OUTBOX | ☐ |
 | CB8 | Reconciling optimistic frontend state with server decisions | version merge, scopes, rebase, rollback | T-RECONCILE + E2E | ☐ |
 | CB-P | Be prepared to explain them | DEMO_SCRIPT.md | rehearsal done | ☐ |

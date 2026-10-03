@@ -238,3 +238,44 @@ leads and members). **Still open for phase 12:** an admin's unfiltered list sort
 `generate_unique_id_function` returns the function name, so the generated client does not change when
 a route moves (FastAPI's default ends in path and method). A test fails if an operation lacks an id,
 a typed response or a typed request body.
+
+## 34. Phase 3 review: what an independent reviewer found, and what was decided
+
+A reviewer that had not seen the session read `tx.py`, `idempotency.py` and their tests
+(`git diff phase-3-start..HEAD`) and probed them against real Postgres. No critical or high finding.
+Fixed (commit "fix(api): findings of the independent review"):
+
+- **NUL or a lone surrogate was a 500** (`reason` had no check; a surrogate broke the fingerprint's
+  encoding). One validator (`_no_nul`) now covers title, description and reason; the fingerprint
+  encodes with `surrogatepass` as a second line.
+- **`tx.now` was taken before waiting for a lock**, so a command that waited stamped `updated_at` and
+  event times from before the winner's commit (non-monotonic, which `sort=updated` and
+  `updated_since` would trip over). `CommandTx.restamp()` takes the time again once the row lock (or
+  the team counter lock) is won, unless the caller pinned `now`.
+- **`record_event` did not check that the item it was given had the row's version.** The stamp
+  UPDATE now returns `version` and `team_id` and the command rolls back (RuntimeError, 500) on a
+  mismatch, so I2 is a runtime invariant for phase 4's many commands, not a convention.
+- **A hidden item was locked before visibility was checked**, so a 503 behind someone else's lock
+  could reveal that it exists. A PATCH now reads visibility first (404), locks, and judges again.
+- Test gaps closed: the retry loop through the idempotency layer plus `record_event`; the
+  `DBAPIError` branch (constraint stored as 4xx, lock timeout is BUSY and not stored, an unmapped
+  error rolls the key back); a task cancelled mid-command; the single-writer scan now covers method
+  forms, aliases, the outbox and NOTIFY.
+
+Not changed:
+
+- **A stored 412 (or 403/404) is replayed under the same key, and `If-Match` is not part of the
+  fingerprint.** Reviewer scenario: the client gets a 412 under key K, rebases, and re-sends under the
+  same K with a new `If-Match`; the server replays the old 412 for 24 h. SPEC 6.3 says to store domain
+  4xx and SPEC 3.2 defines the fingerprint, so this is a SPEC question, not a bug to fix silently.
+  Options: (a) never store state-dependent 4xx (412, 403, 404), or (b) put `If-Match` in the
+  fingerprint so reuse gets an explicit 422. **Open; needs a decision before phase 10.** Until then the
+  rule for the web client is: a rebase or any changed request is a new user action and gets a new key
+  (`lib/useCommand.ts`, phase 8/9).
+- **Path case in the fingerprint** (`/items/pay-1` vs `/items/PAY-1` hash differently): a retry resends
+  identical bytes, so no legitimate retry is affected. Not worth normalising.
+- **`request_id` in a replayed error body** is the first request's id. It identifies the request that
+  was logged; the replay's own id is in `X-Request-ID`. Left.
+- **The actor context is loaded before the command transaction** (SPEC 6.4 draws it inside). A role
+  change landing while a command waits up to 2 s for a lock is not seen by that command. Recorded in
+  KNOWN_LIMITATIONS; SPEC 5.3 (fresh on every request) holds.

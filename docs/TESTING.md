@@ -92,3 +92,39 @@ Time-dependent behaviour uses `time-machine`; every timestamp that matters is pa
 Python (never `now()` in SQL) so the tests can move the clock.
 
 Whole suite at the end of phase 2: 2,854 API tests, about 70 s.
+
+
+## Phase 3 guards (work items core)
+
+Each row was observed red by removing the guard on a committed tree and restoring it with `git checkout`
+(the first attempt of this, done with uncommitted fixes in the tree, wiped them: see NOTES_FOR_INTERVIEW
+phase 3, problem 7).
+
+| Guard | Test | Sabotage observed |
+|---|---|---|
+| Version compared before an edit (and again in the UPDATE) | `tests/concurrency/test_items_concurrency.py` (T-STALE), `tests/integration/test_items_patch.py` | both checks removed: 7 tests red. One check alone leaves them green: the second is a deliberate belt |
+| Idempotency key inserted `ON CONFLICT DO NOTHING` in the command transaction | `test_ten_concurrent_creates_with_one_key_make_exactly_one_item_and_ten_equal_answers` | check-then-insert: red (a second insert fails on the key) |
+| Visibility clause in every item query | `tests/integration/test_items_list.py`, `test_items_create_read.py` | clause removed: walks as lead/member/sup red |
+| `COALESCE(due_at, 'infinity')` in the sort and the cursor | `test_walking_every_page_returns_each_visible_item_once_in_order_for_every_sort` | plain `due_at`: red |
+| Every edit writes its events through `record_event` | `test_an_edit_bumps_the_version_by_one_and_writes_one_event_with_that_version` | loop over events skipped: red |
+| 40001/40P01 restart the command | `tests/db/test_command_tx.py` (3 tests) | retry condition removed: 3 red |
+| Event version equals the row's version | `tests/db/test_record_event.py::test_an_event_that_names_the_wrong_version...` | check removed: red |
+| Time taken again after a lock wait | `test_a_change_that_waited_for_the_row_lock_is_stamped_after_the_wait` | `restamp()` call removed: red |
+| Visibility before locking | `test_someone_who_cannot_see_an_item_gets_an_instant_404_even_while_it_is_locked` | pre-check removed: red |
+| No NUL / surrogate reaches Postgres | `test_text_postgres_cannot_store_is_a_400_in_every_free_text_field` | reason validator removed: red |
+| Constraint becomes a stored 4xx; BUSY and unmapped errors are not stored | `tests/db/test_idempotency_layer.py` | `except DBAPIError` branch removed: red |
+| Only `repo/items.py` and `record_event` write items, events, outbox, NOTIFY; no OFFSET | `tests/unit/test_single_writer.py` (the scanners are tested against samples they must catch) | |
+| Every CHECK and partial unique index is mapped to a domain error or declared a bug | `tests/db/test_command_tx.py::test_every_check_and_partial_unique_index_is_either_mapped_or_a_declared_bug` | |
+| List/detail/facets statements do not grow with rows | `tests/integration/test_query_budget.py` | |
+
+Facts about these tests worth knowing:
+
+- Expected answers for pagination and filters are plain SQL written in the test file, not the code's own
+  query. 1,000 items are inserted with `generate_series` into a scratch database
+  (7 distinct `created_at`, 5 `updated_at`, 20 due dates, ~20% without a due date) so ties and nulls are real.
+- Concurrency tests use real, separate connections (two signed-in clients, `asyncio.gather`); the stuck
+  row lock in the restamp and hidden-item tests is held by a third connection.
+- `tests/concurrency/conftest.py` re-exports the integration fixtures; both run on a seeded, committed
+  scratch database.
+
+Whole suite at the end of phase 3: 3,129 API tests, about 165 s.
