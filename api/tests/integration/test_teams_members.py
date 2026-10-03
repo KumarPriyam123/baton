@@ -368,51 +368,8 @@ async def test_removing_someone_who_is_not_a_member_is_404(
     assert response.status_code == 404
 
 
-# ----- SPEC 4.3b: nobody is left owning items they cannot work ----------------------------
-
-
-async def test_a_member_who_owns_open_items_cannot_be_removed_yet(
-    api: httpx.AsyncClient, seeded: SeededDatabase
-) -> None:
-    asha = await fetch_one(seeded.url, "SELECT id FROM users WHERE email = $1", ASHA)
-    assert asha is not None
-    owned = await fetch_one(
-        seeded.url,
-        "SELECT count(*) AS n FROM work_items i JOIN teams t ON t.id = i.team_id "
-        "WHERE t.key = 'PAY' AND i.assignee_id = $1 "
-        "AND i.status NOT IN ('resolved', 'closed')",
-        asha["id"],
-    )
-    assert owned is not None
-    assert owned["n"] >= 3
-    await signed_in(api, PRIYA)
-
-    response = await api.delete(
-        f"/api/v1/teams/PAY/members/{asha['id']}", headers=csrf_headers(api)
-    )
-
-    body = response.json()
-    assert response.status_code == 409
-    assert body["code"] == "WORKFLOW_VIOLATION"
-    assert f"{owned['n']} open items" in body["detail"]
-    assert await role_of(seeded, asha["id"], "PAY") == "member"  # nothing changed
-
-
-async def test_a_member_who_owns_open_items_cannot_become_a_viewer_yet(
-    api: httpx.AsyncClient, seeded: SeededDatabase
-) -> None:
-    asha = await fetch_one(seeded.url, "SELECT id FROM users WHERE email = $1", ASHA)
-    assert asha is not None
-    await signed_in(api, PRIYA)
-
-    response = await api.patch(
-        f"/api/v1/teams/PAY/members/{asha['id']}",
-        json={"role": "viewer"},
-        headers=csrf_headers(api),
-    )
-
-    assert response.status_code == 409
-    assert await role_of(seeded, asha["id"], "PAY") == "member"
+# SPEC 4.3b (removing or demoting someone unassigns their open items) is in
+# test_membership_unassigns.py.
 
 
 async def test_demoting_a_lead_to_member_is_fine_even_if_they_own_items(

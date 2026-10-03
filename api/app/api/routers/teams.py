@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Query, Request, Response
 
 from app.api.constants import API_PREFIX
 from app.api.deps import Conn, CurrentActor
@@ -31,6 +31,11 @@ async def _team(conn: Conn, key: str) -> teams_repo.TeamRecord:
     if team is None:
         raise NotFound(NO_SUCH_TEAM)
     return team
+
+
+def _request_id(request: Request) -> str | None:
+    value = getattr(request.state, "request_id", None)
+    return str(value) if value else None
 
 
 def _member_out(user_id: uuid.UUID, name: str, email: str, role: TeamRole) -> MemberOut:
@@ -89,19 +94,32 @@ async def add_member(
 
 @router.patch("/{key}/members/{user_id}")
 async def change_role(
-    key: str, user_id: uuid.UUID, body: ChangeRoleRequest, actor: CurrentActor, conn: Conn
+    key: str,
+    user_id: uuid.UUID,
+    body: ChangeRoleRequest,
+    request: Request,
+    actor: CurrentActor,
+    conn: Conn,
 ) -> MemberOut:
+    """Change someone's role. Demoting them to viewer unassigns their open items (SPEC 4.3b)."""
     team = await _team(conn, key)
-    outcome = await teams_service.change_role(conn, actor.ctx, team, user_id, body.role)
+    outcome = await teams_service.change_role(
+        conn, actor.ctx, team, user_id, body.role, request_id=_request_id(request)
+    )
     if outcome is None:
         raise NotFound(NOT_A_MEMBER)
     return await _member(conn, team, user_id)
 
 
 @router.delete("/{key}/members/{user_id}", status_code=204)
-async def remove_member(key: str, user_id: uuid.UUID, actor: CurrentActor, conn: Conn) -> Response:
+async def remove_member(
+    key: str, user_id: uuid.UUID, request: Request, actor: CurrentActor, conn: Conn
+) -> Response:
+    """Remove someone from the team. Their open items there go back to `new` (SPEC 4.3b)."""
     team = await _team(conn, key)
-    if not await teams_service.remove_member(conn, actor.ctx, team, user_id):
+    if not await teams_service.remove_member(
+        conn, actor.ctx, team, user_id, request_id=_request_id(request)
+    ):
         raise NotFound(NOT_A_MEMBER)
     return Response(status_code=204)
 
