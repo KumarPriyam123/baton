@@ -11,7 +11,7 @@ router = APIRouter(prefix=f"{API_PREFIX}/demo", tags=["demo"])
 
 
 @router.get("/users")
-async def demo_users(settings: AppSettings, conn: Conn) -> DemoUsersOut:
+async def list_demo_users(settings: AppSettings, conn: Conn) -> DemoUsersOut:
     """The quick account switcher for the login page. Exists only when DEMO_MODE=true; in any
     other configuration it is a plain 404, as if the route were not there."""
     if not settings.demo_mode:

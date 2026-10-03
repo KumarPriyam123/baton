@@ -32,6 +32,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/api/openapi.json",
         redoc_url=None,
         lifespan=lifespan,
+        # The operation id is the function name: stable when a route moves, and the name the
+        # generated TypeScript client exposes.
+        generate_unique_id_function=lambda route: route.name,
     )
     app.state.settings = settings
     install_error_handlers(app)

@@ -31,7 +31,7 @@ async def build_me(conn: AsyncConnection, user_id: str | uuid.UUID, csrf_token: 
 
 
 @router.get("/me")
-async def me(request: Request, response: Response, actor: CurrentActor, conn: Conn) -> MeOut:
+async def get_me(request: Request, response: Response, actor: CurrentActor, conn: Conn) -> MeOut:
     """Who I am, my teams and roles, and the CSRF token to send with unsafe requests.
 
     If the CSRF cookie has gone missing (cleared, or a new browser profile with a copied

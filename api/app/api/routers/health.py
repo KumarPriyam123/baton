@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from app.api.constants import API_PREFIX
 from app.db.migrations import check_ready
@@ -15,7 +16,15 @@ async def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.get("/readyz")
+class ReadyOut(BaseModel):
+    status: str
+    database: bool
+    migrations: bool
+    current: str | None
+    expected: str
+
+
+@router.get("/readyz", response_model=ReadyOut, responses={503: {"model": ReadyOut}})
 async def readyz(request: Request) -> JSONResponse:
     """Readiness: the database answers and its migrations are at the head this code expects."""
     report = await check_ready(request.app.state.engine)

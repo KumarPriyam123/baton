@@ -94,12 +94,12 @@ def optional_key(
 
 def required_key(
     idempotency_key: Annotated[
-        str | None,
+        str,
         Header(
             alias=KEY_HEADER,
             description="Required. One new random value per user action; reuse it on every retry.",
         ),
-    ] = None,
+    ],
 ) -> str:
     parsed = parse_key(idempotency_key, required=True)
     assert parsed is not None
