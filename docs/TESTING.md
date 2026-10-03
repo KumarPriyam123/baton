@@ -33,7 +33,7 @@ End-to-end tests arrive in phase 13. A skipped test counts as a failure.
 | Every SPEC 3.2 index, primary key and table exists as specified, and no unlisted index exists | `tests/db/test_indexes.py` | 1 |
 | Migration is reversible and repeatable | `tests/db/test_migrations.py` (catalog snapshot equal after up, down, up) | 1 |
 | Python tables and enums cannot drift from the database | `tests/db/test_schema_drift.py` | 1 |
-| Seeded histories are valid, and the verifier is not vacuous | `tests/unit/test_seed_histories.py` (6 seeds x 600 histories; 10 kinds of corruption must be reported) | 1 |
+| Seeded histories are valid, and the verifier is not vacuous | `tests/unit/test_seed_histories.py` (6 seeds x 600 histories; 13 kinds of corruption must be reported) | 1 |
 
 _SPEC section 14 guards are added as they are built._
 
@@ -59,7 +59,7 @@ its event kind may cause, that versions are contiguous, that decisions carry rea
 that the replayed state equals the stored row and the approvals agree with their events.
 The check is deliberately independent of the generator (`sim.py`).
 
-Measured on the large seed (50,000 items, 586,983 events): every history valid, 14 s.
+Measured on the large seed (50,000 items, 586,983 events): every history valid, 17 s.
 
 ## Sabotage checks
 

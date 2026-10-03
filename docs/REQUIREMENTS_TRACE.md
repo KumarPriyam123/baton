@@ -15,6 +15,15 @@ Status: ☐ not started · ◐ built, proof pending · ☑ proven
 | LF everywhere, gitleaks clean, PDF and `.env` untracked | ☑ | `git ls-files --eol` has no CRLF; gitleaks scanned 12 commits locally and in CI, no leaks; CI `hygiene` job fails on CRLF, tracked PDF or `.env` |
 | `X-Request-ID` on every response, same id in the API log line | ☑ | `test_same_request_id_appears_in_the_api_log_line`, `test_unhandled_exception_returns_problem_json_with_request_id`; manual check through nginx |
 
+## Phase 1: schema, migrations, seed data (carries G1, G7, T1, C3, X1, D5)
+
+| Done-when | Status | Proof |
+|---|---|---|
+| Constraint tests pass, and each fails if its guard is dropped | ☑ | `tests/db/test_constraints.py`: 28 violations, each rejected under its own guard name (`test_database_rejects_it_and_names_the_guard`) and each succeeding once the guard is dropped (`test_it_only_fails_because_of_that_guard`). By hand: `owner_when_active` removed from the migration, 5 tests red (TESTING.md). |
+| Migration round trip is clean | ☑ | `tests/db/test_migrations.py`: catalog snapshot equal after up, down, up; downgrade leaves only `alembic_version`; 0002 converts data both ways. |
+| Demo seed under 30 s via `docker compose up`; large seed under 5 min | ☑ | From `down -v`: stack up in 21 s including builds, seed 1.37 s. Large: 69 s wall (`seed_done` 61 s). Idempotent: a second `up` logs `seed_skipped`. |
+| 20 random seeded items have valid histories | ☑ | `seed` verifies 20 after loading; `verify_seed` replayed all 600 demo and all 50,000 large histories: 0 problems (17 s for the large set). `tests/unit/test_seed_histories.py`: 6 seeds x 600 histories, 13 kinds of corruption reported. |
+
 ## The situation (pain points the product must fix)
 
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
@@ -44,7 +53,7 @@ Status: ☐ not started · ◐ built, proof pending · ☑ proven
 
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
 |---|---|---|---|---|---|
-| T1 | Multiple teams; a user may be in several with different responsibilities | memberships with a role per team | 1, 2 | policy matrix tests | ☐ |
+| T1 | Multiple teams; a user may be in several with different responsibilities | memberships with a role per team | 1, 2 | policy matrix tests | ◐ phase 1: `memberships`, demo personas hold different roles in different teams; policy tests in phase 2 |
 | T2 | Not every user can perform every action | permission matrix SPEC §5.2 | 2, 4 | policy matrix tests | ☐ |
 | T3 | Meaningful authorization model | team roles + resource rules (requester, assignee, confidential, four-eyes) | 2, 4 | policy matrix; T-VIS | ☐ |
 | T4 | Enforced by the system, not only by hiding UI controls | server policy + SQL visibility clause; 404 for invisible | 2, 5, 11 | T-VIS; E2E viewer direct API 403 | ☐ |
@@ -55,7 +64,7 @@ Status: ☐ not started · ◐ built, proof pending · ☑ proven
 |---|---|---|---|---|---|
 | C1 | Users collaborate around work items | comments, watchers, notifications | 5, 6, 10 | comment tests; E2E | ☐ |
 | C2 | Understand how an item evolved: responsibility, priority, workflow | typed events with from/to; handoff track; Decisions filter | 3, 4, 10 | event tests; screenshot | ☐ |
-| C3 | Important actions don't silently disappear | one write path (`record_event`), same transaction, append-only trigger, reasons required for decisions | 1, 3 | event invariant test; trigger test | ☐ |
+| C3 | Important actions don't silently disappear | one write path (`record_event`), same transaction, append-only trigger, reasons required for decisions | 1, 3 | event invariant test; trigger test | ◐ phase 1: append-only trigger tested (UPDATE, DELETE, no-op rewrite); `record_event` and its tests in phase 3 |
 
 ## Concurrent usage
 
@@ -88,7 +97,7 @@ Status: ☐ not started · ◐ built, proof pending · ☑ proven
 
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
 |---|---|---|---|---|---|
-| X1 | Thousands of users, hundreds to a few thousand simultaneous, many teams, tens of thousands of active items, large growing history | large seed (2,000 users, 40 teams, 50,000 items, ~600,000 events); bench with concurrent users | 1, 12 | PERFORMANCE.md | ☐ |
+| X1 | Thousands of users, hundreds to a few thousand simultaneous, many teams, tens of thousands of active items, large growing history | large seed (2,000 users, 40 teams, 50,000 items, ~600,000 events); bench with concurrent users | 1, 12 | PERFORMANCE.md | ◐ phase 1: large seed loads (2,000 users, 40 teams, 50,000 items of which 18,107 open, 586,983 events, 127,714 comments); benchmarks in phase 12 |
 | X2 | Must not load the entire dataset into the browser or application memory | keyset pagination everywhere, bounded queries, worker batches, bounded SSE queues | 3, 7, 9 | no-OFFSET check; query-plan test | ☐ |
 | X3 | Design for continued growth | scaling path in ARCHITECTURE.md (partitioning, replicas, sequences, search engine) | 14 | ARCHITECTURE.md | ☐ |
 
@@ -96,13 +105,13 @@ Status: ☐ not started · ◐ built, proof pending · ☑ proven
 
 | ID | Area | Where it's shown | Proof | Status |
 |---|---|---|---|---|
-| G1 | Data modelling | SPEC §3; constraints; event log | schema tests; Decision #5 | ☐ |
+| G1 | Data modelling | SPEC §3; constraints; event log | schema tests; Decision #5 | ◐ phase 1: schema, 28 named guards, index inventory, drift tests proven; the write-up (Decision #5) in phase 14 |
 | G2 | API design | commands vs PATCH, ETag/If-Match, problem+json, idempotency, keyset cursors | OpenAPI; Decision #3 | ☐ |
 | G3 | Frontend state management | TanStack Query, version merge, mutation scopes, rebase | vitest suite | ☐ |
 | G4 | Authorization | policy + visibility clause | policy matrix; T-VIS | ☐ |
 | G5 | Concurrent operations | CB1–CB3, CB5 | concurrency tests | ☐ |
 | G6 | Error handling | SPEC §12 mapping; timeouts; retries; designed error states | failure drills | ☐ |
-| G7 | Data consistency | single transaction per command; outbox; DB constraints | event invariant; rollback test | ☐ |
+| G7 | Data consistency | single transaction per command; outbox; DB constraints | event invariant; rollback test | ◐ phase 1: DB constraints and triggers proven; transactions and outbox in phases 3 and 6 |
 | G8 | Search and filtering | FTS + trigram + facets + URL filters | search tests | ☐ |
 | G9 | Application performance | indexes, budgets, virtualisation | PERFORMANCE.md | ☐ |
 | G10 | Maintainability | pure domain modules, layered code, generated client, CI, docs | CI; layout | ◐ phase 0: layout, CI green (run 37122809241), pre-commit; domain modules and client later |
@@ -130,7 +139,7 @@ Status: ☐ not started · ◐ built, proof pending · ☑ proven
 | D2 | Clear instructions for running the application | README Quick start (verified from a clean clone) | ◐ stub verified from a clean clone on 8082; 8080 itself deferred to the phase 14 clean-clone check |
 | D3 | Any required setup instructions | README; `.env.example` | ◐ `.env.example` lists every variable; README stub |
 | D4 | Engineering decisions document (~5 decisions, trade-offs) | `docs/ENGINEERING_DECISIONS.md` | ☐ |
-| D5 | Automated tests for important behaviour, reflecting the architecture's risks | `api/tests`, `web/src/**/*.test.ts`, `web/e2e`; `docs/TESTING.md` | ◐ phase 0: test harness, fail-not-skip guard (20 api + 4 web tests) |
+| D5 | Automated tests for important behaviour, reflecting the architecture's risks | `api/tests`, `web/src/**/*.test.ts`, `web/e2e`; `docs/TESTING.md` | ◐ phases 0-1: harness, fail-not-skip guard, database guards (253 tests: 249 api + 4 web) |
 | D6 | Brief description of known limitations | `docs/KNOWN_LIMITATIONS.md` | ☐ |
 | D7 | Architecture diagrams or extra docs (welcome) | `docs/ARCHITECTURE.md` | ☐ |
 | D8 | Important assumptions documented | README Assumptions (SPEC §1) | ☐ |
