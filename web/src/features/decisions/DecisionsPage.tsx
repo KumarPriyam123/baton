@@ -68,7 +68,13 @@ function DecisionRow({
           </Link>
         </p>
         <p className="mt-1 text-body">
-          <span className="font-strong">{actorName(decision)}</span> {sentence}
+          {decision.kind === "approval_invalidated" ? (
+            sentence
+          ) : (
+            <>
+              <span className="font-strong">{actorName(decision)}</span> {sentence}
+            </>
+          )}
         </p>
         {decision.reason ? (
           <blockquote className="m-0 mt-2 max-w-2xl border-l-2 border-rule pl-3 text-body text-ink">

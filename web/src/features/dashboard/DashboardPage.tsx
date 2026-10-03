@@ -1,6 +1,7 @@
 /** Dashboard (DESIGN §4.6): a table, because the job is comparing teams. Every figure is a link
  * to the queue with the matching filter, except "going quiet", which the queue cannot filter yet
  * (KNOWN_LIMITATIONS): a number that opens a different list would be worse than plain text. */
+import { clsx } from "clsx";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Fragment, useState } from "react";
 import { Link } from "react-router";
@@ -54,7 +55,7 @@ function Headline({
 }) {
   const number = (
     <span
-      className={cn(
+      className={clsx(
         "tnum text-figure font-heading",
         tone === "alert" && value > 0 ? "text-p0" : "text-ink",
       )}
@@ -120,7 +121,7 @@ function PriorityBar({ team, scale }: { team: TeamStats; scale: number }) {
 }
 
 const COLS =
-  "grid grid-cols-[minmax(150px,1fr)_minmax(260px,2fr)_repeat(7,72px)] items-center gap-x-3";
+  "grid grid-cols-[minmax(170px,1fr)_minmax(220px,2fr)_84px_84px_68px_76px_68px_68px_60px] items-center gap-x-2";
 const HEADERS = [
   "New",
   "In progress",

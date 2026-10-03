@@ -154,7 +154,14 @@ function NotificationList({ open, onClose }: { open: boolean; onClose: () => voi
                   </span>
                   <span className="mt-1 flex flex-col gap-0.5">
                     {group.rows.map((row) => (
-                      <span key={row.id} className="flex items-baseline gap-3 text-meta">
+                      <span key={row.id} className="flex items-baseline gap-2 text-meta">
+                        <span
+                          aria-hidden
+                          className={cn(
+                            "size-1.5 shrink-0 self-center rounded-full",
+                            row.read_at === null ? "bg-dispatch" : "bg-transparent",
+                          )}
+                        />
                         <span
                           className={cn(
                             "min-w-0 flex-1 truncate",
