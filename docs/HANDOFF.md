@@ -6,7 +6,7 @@ Where the project stands, how to run it, and what to know before the next sessio
 
 **Phase 4 (workflow, ownership, approvals) is done. Phase 5 has not started.** Tags: `phase-4-start`, `phase-4-done`.
 
-Repo: https://github.com/KumarPriyam123/baton (private). Phase 4 commits are local until pushed.
+Repo: https://github.com/KumarPriyam123/baton (private). CI is green on `main` for phase 4 (api, web, hygiene): https://github.com/KumarPriyam123/baton/actions/runs/37141764027
 
 What exists, on top of phases 0-3:
 
@@ -18,7 +18,7 @@ What exists, on top of phases 0-3:
 - **Tests:** 3,325 API tests (unit, db, integration, concurrency; none skipped; about 350 s) and 4 web tests, about 350 s, all needing real Postgres. Phase 4 added T-FLOW (720 cells), T-CLAIM (service and HTTP), T-APPROVE-RACE (50 rounds), the approval and membership races, the seed replay through `workflow.evaluate`, persona checks and per-clause UPDATE guards. Sabotage results: `docs/TESTING.md`.
 
 Verified in this phase: every Done-when item (see `docs/REQUIREMENTS_TRACE.md`), the five sabotage rows (and why two of them needed more tests), the real stack through nginx on port 8081 (migration head 0004, claim, 409, 422 `APPROVAL_REQUIRED`, request, approve, events), an independent review (decision 45: four findings fixed, the rest left with reasons).
-**Still deferred:** `docker compose up` on port 8080 itself (another local project holds it); re-check at the phase 14 clean-clone run. **Not pushed:** nothing from phase 4 has been pushed, so CI has not run on it.
+**Still deferred:** `docker compose up` on port 8080 itself (another local project holds it); re-check at the phase 14 clean-clone run.
 
 Not built yet, by design: comments/watch/read, search, attention, notifications, the worker, SSE, the web UI, stats and decisions endpoints.
 
@@ -72,7 +72,6 @@ curl -b jar 'localhost:8080/api/v1/items?status=new&sort=updated&limit=5'
 - **A test that opens an asyncpg connection must close it** (`try/finally`, or `rows()` / `scalar()` in `tests/support/items.py`). Warnings are errors, so a leaked connection fails some other test later (`ResourceWarning: unclosed transport`).
 - **Race tests need distinct people.** `tests/support/workflow.py` has `extra_workers` (new PAY members with the shared test password), `many_clients` (one app, one signed-in client per email) and `released_together` lives in `tests/concurrency/test_workflow_concurrency.py`.
 - **Sabotage on a scratch branch from a committed tree**, restoring with `git checkout -- <file>`; the helper pattern is a tiny script that asserts the text occurs once before replacing it.
-- **The dev database now holds PAY-113**, created by the smoke test of the real stack. Re-seed (`seed --size demo --reset`) if a clean demo is wanted.
 - **Git identity** in this repo is `kpriyam2005p@gmail.com`; the account email is `k2005priyam@gmail.com`. Unconfirmed which is intended.
 
 ## Decisions that shape later phases
