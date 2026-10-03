@@ -78,12 +78,19 @@ function Highlighted({ text, query }: { text: string; query: string | undefined 
   );
 }
 
-export function NextStepChip({ step }: { step: ItemOut["next_step"] }) {
+export function NextStepChip({
+  step,
+  className,
+}: {
+  step: ItemOut["next_step"];
+  className?: string;
+}) {
   return (
     <span
       className={cn(
         "inline-flex max-w-64 items-center truncate rounded-chip px-2 py-0.5 text-small font-strong",
         CHIP[step.severity],
+        className,
       )}
     >
       <span className="truncate">{step.label}</span>
@@ -115,8 +122,8 @@ export function Strip({
     <div
       role="listitem"
       className={cn(
-        "group relative flex h-11 items-stretch border-b border-rule transition-colors duration-100 ease-linear",
-        selected ? "bg-dispatch-wash" : "hover:bg-dispatch-wash/60",
+        "strip group relative flex h-11 items-stretch border-b border-rule transition-colors duration-100 ease-linear",
+        selected ? "bg-dispatch-wash" : "hover:bg-dispatch-wash",
       )}
     >
       <span aria-hidden className={cn("w-1 shrink-0", EDGE[item.priority])} />
@@ -127,11 +134,11 @@ export function Strip({
         aria-current={selected ? "true" : undefined}
         onFocus={() => onPrefetch?.(item)}
         onMouseEnter={() => onPrefetch?.(item)}
-        className="flex min-w-0 flex-1 items-center gap-3 pr-4 pl-3 text-ink no-underline focus-visible:outline-offset-[-2px]"
+        className="strip-link min-w-0 flex-1 pr-4 pl-3 text-ink no-underline focus-visible:outline-offset-[-2px]"
       >
-        <span className="tnum w-16 shrink-0 text-meta text-pencil">{item.key}</span>
-        <StatusIcon status={item.status} />
-        <span className="min-w-0 flex-1 truncate text-body font-strong">
+        <span className="strip-key tnum text-meta text-pencil">{item.key}</span>
+        <StatusIcon status={item.status} className="strip-icon" />
+        <span className="strip-title min-w-0 truncate text-body leading-5 font-strong">
           <Highlighted text={item.title} query={highlight} />
           {item.confidential && (
             <Lock
@@ -142,23 +149,23 @@ export function Strip({
             />
           )}
         </span>
-        <NextStepChip step={item.next_step} />
-        <Avatar person={item.assignee} />
+        <NextStepChip step={item.next_step} className="strip-chip" />
+        <Avatar person={item.assignee} className="strip-avatar" />
         <span
-          className="tnum w-9 shrink-0 text-right text-small text-pencil"
+          className="strip-age tnum text-right text-small text-pencil"
           title={`Updated ${fullTime(item.updated_at)}`}
         >
           {ageShort(item.updated_at, now)}
         </span>
         <span
-          className={cn("size-2 shrink-0 rounded-full", unread ? "bg-dispatch" : "bg-transparent")}
+          className={cn("strip-dot size-2 rounded-full", unread ? "bg-dispatch" : "bg-transparent")}
           role={unread ? "img" : undefined}
           aria-label={unread ? "Updated since you last opened it" : undefined}
           aria-hidden={unread ? undefined : true}
         />
       </Link>
       {actions && (
-        <div className="absolute inset-y-0 right-10 hidden items-center bg-inherit pl-2 group-focus-within:flex group-hover:flex">
+        <div className="absolute inset-y-0 right-0 hidden items-center bg-linear-to-l from-dispatch-wash from-80% to-transparent pr-3 pl-10 group-focus-within:flex group-hover:flex">
           {actions}
         </div>
       )}

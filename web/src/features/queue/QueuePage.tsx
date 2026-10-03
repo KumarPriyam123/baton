@@ -220,7 +220,9 @@ function ResultList({
                 now={now}
                 highlight={filters.q}
                 onPrefetch={prefetchItem}
-                actions={<AssignToMe item={item} />}
+                actions={
+                  item.allowed_actions.includes("claim") ? <AssignToMe item={item} /> : undefined
+                }
               />
             </div>
           );

@@ -114,7 +114,13 @@ export function LoginPage() {
         {demo.data && (
           <div className="mt-6 border-t border-rule pt-4">
             <h2 className="text-section">Demo accounts</h2>
-            <ul className="mt-2 flex flex-col">
+            <ul
+              // A long list scrolls inside the panel so the sign-in form never leaves the screen.
+              // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- keyboard users must be able to scroll it
+              tabIndex={0}
+              aria-label="Demo accounts"
+              className="mt-2 flex max-h-56 flex-col overflow-y-auto"
+            >
               {demo.data.users.map((user) => (
                 <li key={user.email}>
                   <button

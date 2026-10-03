@@ -107,7 +107,9 @@ export function InboxPage() {
                   to={`/items/${item.key}`}
                   now={now}
                   onPrefetch={prefetchItem}
-                  actions={<AssignToMe item={item} />}
+                  actions={
+                    item.allowed_actions.includes("claim") ? <AssignToMe item={item} /> : undefined
+                  }
                 />
               ))}
             </div>
