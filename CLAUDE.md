@@ -83,6 +83,7 @@ Everything runs in containers so it works the same on Windows, macOS and Linux.
 | New migration | `docker compose run --rm migrate alembic revision -m "<msg>"` |
 | Regenerate API types | `cd web && npm run gen:api` (API must be running) |
 | Two workers | `docker compose up --scale worker=2` |
+| Test containers | `api-test` mounts `./api` and `web-test` mounts `./web/src`, so source changes need no rebuild. After dependency or Dockerfile changes, add `--build` (e.g. `run --rm --build api-test`). |
 
 ## Invariants — never break these
 

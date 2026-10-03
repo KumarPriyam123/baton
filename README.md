@@ -11,7 +11,9 @@ Work in progress. Phase 0 (foundation) only: the stack starts and tests run.
 docker compose up --build
 ```
 
-Open http://localhost:8080. If something else already uses 8080, run with `WEB_PORT=8081`.
+Open http://localhost:8080.
+
+If port 8080 is taken, set WEB_PORT=8081 in .env.
 
 ## Test it
 
