@@ -56,10 +56,16 @@ def build_app(settings: Settings) -> FastAPI:
     return app
 
 
+CSRF = {"X-CSRF-Token": "t"}
+
+
 @pytest.fixture
 async def errors_client(settings: Settings) -> httpx.AsyncClient:
+    """Unsafe methods need the CSRF pair (SPEC 5.4), so this client carries one."""
     transport = httpx.ASGITransport(app=build_app(settings), raise_app_exceptions=False)
-    return httpx.AsyncClient(transport=transport, base_url="http://test")
+    client = httpx.AsyncClient(transport=transport, base_url="http://test")
+    client.cookies.set("baton_csrf", "t")
+    return client
 
 
 def test_error_classes_match_the_spec_table_exactly() -> None:
@@ -89,7 +95,7 @@ async def test_validation_errors_are_400_with_field_errors_and_never_echo_input(
     errors_client: httpx.AsyncClient,
 ) -> None:
     response = await errors_client.post(
-        "/api/v1/_validate", json={"title": "ab", "priority": 9, "password": 123}
+        "/api/v1/_validate", json={"title": "ab", "priority": 9, "password": 123}, headers=CSRF
     )
 
     body = response.json()
@@ -105,7 +111,9 @@ async def test_malformed_json_is_also_a_validation_failure(
     errors_client: httpx.AsyncClient,
 ) -> None:
     response = await errors_client.post(
-        "/api/v1/_validate", content=b"{not json", headers={"content-type": "application/json"}
+        "/api/v1/_validate",
+        content=b"{not json",
+        headers={"content-type": "application/json", **CSRF},
     )
 
     assert response.status_code == 400
@@ -125,7 +133,7 @@ async def test_unknown_path_is_not_found_in_the_same_shape(
 
 
 async def test_wrong_method_is_405_with_the_allow_header(errors_client: httpx.AsyncClient) -> None:
-    response = await errors_client.delete("/api/v1/healthz")
+    response = await errors_client.delete("/api/v1/healthz", headers=CSRF)
 
     assert response.status_code == 405
     assert response.json()["code"] == "METHOD_NOT_ALLOWED"
