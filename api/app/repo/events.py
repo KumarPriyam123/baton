@@ -86,6 +86,19 @@ async def list_events(
     return page, page[-1].id if len(rows) > limit else None
 
 
+async def last_assigned_at(conn: AsyncConnection, item_id: uuid.UUID) -> datetime | None:
+    """When the item last got an owner (for "Asha took this 4 seconds ago")."""
+    e = schema.item_events.c
+    return (
+        await conn.execute(
+            sa.select(e.created_at)
+            .where(e.item_id == item_id, e.kind == EventKind.ASSIGNED.value)
+            .order_by(e.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
 async def changes_since(
     conn: AsyncConnection, item_id: uuid.UUID, version: int
 ) -> list[EventRecord]:

@@ -79,6 +79,27 @@ async def get_role(
     return TeamRole(role) if role is not None else None
 
 
+async def share_lock_role(
+    conn: AsyncConnection, team_id: uuid.UUID, user_id: uuid.UUID
+) -> TeamRole | None:
+    """The role as it is NOW, with the membership row locked FOR SHARE until the command ends.
+
+    A command that makes someone the owner of an item (claim, assign, reopen to the previous
+    owner, transfer keeping the owner) reads the owner's role this way. Removing or demoting that
+    person takes the row FOR UPDATE first, so one of the two waits for the other: either the new
+    owner is seen as gone, or the removal then finds and unassigns the item (SPEC 4.3b). A
+    deadlock between the two is retried by run_command."""
+    m = schema.memberships.c
+    role = (
+        await conn.execute(
+            sa.select(m.role)
+            .where(m.team_id == team_id, m.user_id == user_id)
+            .with_for_update(read=True)
+        )
+    ).scalar_one_or_none()
+    return TeamRole(role) if role is not None else None
+
+
 async def insert_membership(
     conn: AsyncConnection, team_id: uuid.UUID, user_id: uuid.UUID, role: TeamRole
 ) -> bool:

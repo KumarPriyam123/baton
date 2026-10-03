@@ -25,6 +25,7 @@ async def handle_domain_error(request: Request, exc: Exception) -> JSONResponse:
         errors=exc.errors,
         current=exc.current,
         changes_since=exc.changes_since,
+        extras=exc.extras,
     )
     return problem_response(body, exc.headers)
 

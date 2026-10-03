@@ -773,6 +773,16 @@ def plan_transition(
     raise ValueError(f"plan_transition does not handle {action}")
 
 
+def claim_plan(actor_id: uuid.UUID, now: datetime) -> TransitionPlan:
+    """What a claim writes. Unlike every other command, the claim does not call `evaluate` first:
+    its state rule (an unassigned `new` item) is the WHERE clause of the UPDATE that makes it, which
+    is what decides a race (SPEC 6.1, decision 39). The same rule is the (CLAIM, NEW) row above, so
+    `allowed_actions` and T-FLOW agree with the SQL."""
+    new = TransitionState(ItemStatus.NEW, assignee_id=None)
+    to = TRANSITIONS[(Action.CLAIM, ItemStatus.NEW)].to
+    return plan_transition(Action.CLAIM, new, Allowed(to), actor_id=actor_id, now=now)
+
+
 def _plan_reopen(
     state: TransitionState, reason: str | None, previous_owner_can_work: bool
 ) -> TransitionPlan:
@@ -863,6 +873,47 @@ def plan_transfer(
         pending.id if pending else None,
         tuple(a.id for a in stale),
         invalidated_reason,
+    )
+
+
+# ----- losing the right to work an item (SPEC 4.3b) -----------------------------------------
+
+
+@dataclass(frozen=True)
+class RemovalPlan:
+    updates: dict[str, Any]
+    events: tuple[PlannedEvent, ...]
+    cancelled: uuid.UUID | None  # the pending approval, cancelled with the same reason
+
+
+def plan_removal_unassign(
+    state: TransitionState, pending: ApprovalFact | None, reason: str
+) -> RemovalPlan:
+    """Someone was removed from the team, demoted to viewer or deactivated: each open item they
+    owned goes back to `new` with an `unassigned` event. An item awaiting approval has its pending
+    approval cancelled first, with the same reason (so it is in_progress when it is unassigned)."""
+    events: list[PlannedEvent] = []
+    status = state.status
+    if pending is not None:
+        events.append(
+            PlannedEvent(
+                EventKind.APPROVAL_CANCELLED,
+                {
+                    "approval_id": str(pending.id),
+                    "status": _from_to(status, ItemStatus.IN_PROGRESS),
+                },
+                reason,
+            )
+        )
+        status = ItemStatus.IN_PROGRESS
+    events.append(
+        PlannedEvent(EventKind.UNASSIGNED, {"assignee": _from_to(state.assignee_id, None)}, reason)
+    )
+    events.append(_status_event(status, ItemStatus.NEW))
+    return RemovalPlan(
+        {"assignee_id": None, "status": ItemStatus.NEW},
+        tuple(events),
+        pending.id if pending else None,
     )
 
 

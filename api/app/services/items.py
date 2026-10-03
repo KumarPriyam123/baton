@@ -202,7 +202,7 @@ class StaleVersion(Exception):
         self.changes_since = changes_since
 
 
-def _locked_facts(item: items_repo.LockedItem) -> ItemFacts:
+def locked_facts(item: items_repo.LockedItem) -> ItemFacts:
     return ItemFacts(
         team_id=item.team_id,
         requester_id=item.requester_id,
@@ -214,29 +214,43 @@ def _locked_facts(item: items_repo.LockedItem) -> ItemFacts:
     )
 
 
-async def edit_item(
-    tx: CommandTx, ctx: ActorContext, key: str, expected_version: int, edit: EditItem
-) -> EditResult:
-    """PATCH (SPEC 4.2, 6.2): lock, who may, which version, what is valid, write, record."""
+async def lock_visible(tx: CommandTx, ctx: ActorContext, key: str) -> items_repo.LockedItem:
+    """First step of every command on an existing item (SPEC 6.4): lock its row, and treat an item
+    the actor may not see exactly like a missing one (404)."""
     # Look before locking: someone who cannot see the item must not be able to tell it exists by
     # waiting on another command's row lock (a 503 where a missing key is an instant 404).
     if await items_repo.visible_item_id(tx.conn, ctx, key) is None:
         raise NotFound(Decision.not_found().reason)
     item = await items_repo.lock_by_key(tx.conn, key)
     tx.restamp()  # the lock may have been a wait; stamp the change at the time it happens
-    facts = _locked_facts(item) if item else None
-    if item is None or facts is None or not can_view(ctx, facts):
+    if item is None or not can_view(ctx, locked_facts(item)):
         raise NotFound(Decision.not_found().reason)
+    return item
+
+
+async def ensure_version(
+    tx: CommandTx, ctx: ActorContext, item: items_repo.LockedItem, expected_version: int
+) -> None:
+    """412 with the item as it is now and what changed since the actor looked (SPEC 6.2)."""
+    if item.version != expected_version:
+        current = await get_item(tx.conn, ctx, item.key, tx.now)
+        since = await events_repo.changes_since(tx.conn, item.id, expected_version)
+        raise StaleVersion(current, since)
+
+
+async def edit_item(
+    tx: CommandTx, ctx: ActorContext, key: str, expected_version: int, edit: EditItem
+) -> EditResult:
+    """PATCH (SPEC 4.2, 6.2): lock, who may, which version, what is valid, write, record."""
+    item = await lock_visible(tx, ctx, key)
+    facts = locked_facts(item)
 
     for action in workflow.required_actions(edit.fields):
         decision = can(ctx, action, facts)
         if not decision.allowed:
             raise Forbidden(decision.reason)
 
-    if item.version != expected_version:
-        current = await get_item(tx.conn, ctx, key, tx.now)
-        since = await events_repo.changes_since(tx.conn, item.id, expected_version)
-        raise StaleVersion(current, since)
+    await ensure_version(tx, ctx, item, expected_version)
 
     approvals = await approvals_repo.live_for_item(tx.conn, item.id)  # item first, then approvals
     plan = workflow.plan_edit(

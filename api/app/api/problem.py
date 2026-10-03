@@ -19,6 +19,7 @@ def problem_body(
     errors: list[dict[str, str]] | None = None,
     current: dict[str, Any] | None = None,
     changes_since: list[dict[str, Any]] | None = None,
+    extras: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {
         "type": f"urn:baton:problem:{code.lower().replace('_', '-')}",
@@ -34,6 +35,8 @@ def problem_body(
         body["current"] = current
     if changes_since is not None:
         body["changes_since"] = changes_since
+    if extras:
+        body.update({k: v for k, v in extras.items() if k not in body})
     return body
 
 

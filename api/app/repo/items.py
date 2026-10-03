@@ -17,6 +17,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 import sqlalchemy as sa
@@ -228,6 +229,20 @@ async def get_visible_by_key(
     return ItemRecord.from_row(row) if row else None
 
 
+async def get_by_key_unchecked(
+    conn: AsyncConnection, viewer_id: uuid.UUID, key: str
+) -> ItemRecord | None:
+    """The item with no visibility filter, for the answer to a command whose actor may have just
+    given up the right to see it (a lead who transfers an item away, decision 38). Only a command
+    that has already authorised the actor may call this; never a read endpoint."""
+    return _first(await conn.execute(_item_query(viewer_id, _page(wi.key == key).subquery("page"))))
+
+
+def _first(result: sa.CursorResult[Any]) -> ItemRecord | None:
+    row = result.first()
+    return ItemRecord.from_row(row) if row else None
+
+
 async def visible_item_id(conn: AsyncConnection, ctx: ActorContext, key: str) -> uuid.UUID | None:
     """The id of an item the actor may see (for its events), or None."""
     found = (
@@ -245,12 +260,15 @@ class LockedItem:
     key: str
     version: int
     team_id: uuid.UUID
+    team_key: str
     team_name: str
     type: ItemType
     title: str
     description: str
     priority: int
     status: ItemStatus
+    resolution: Resolution | None
+    duplicate_of_id: uuid.UUID | None
     due_at: datetime | None
     due_source: DueSource
     created_at: datetime
@@ -277,12 +295,15 @@ async def lock_by_key(conn: AsyncConnection, key: str) -> LockedItem | None:
                 wi.key,
                 wi.version,
                 wi.team_id,
+                t.key.label("team_key"),
                 t.name.label("team_name"),
                 wi.type,
                 wi.title,
                 wi.description,
                 wi.priority,
                 wi.status,
+                wi.resolution,
+                wi.duplicate_of_id,
                 wi.due_at,
                 wi.due_source,
                 wi.created_at,
@@ -302,6 +323,8 @@ async def lock_by_key(conn: AsyncConnection, key: str) -> LockedItem | None:
     values = dict(row._mapping)
     values["type"] = ItemType(values["type"])
     values["status"] = ItemStatus(values["status"])
+    if values["resolution"] is not None:
+        values["resolution"] = Resolution(values["resolution"])
     values["due_source"] = DueSource(values["due_source"])
     return LockedItem(**values)
 
@@ -358,6 +381,11 @@ async def insert_item(conn: AsyncConnection, values: Mapping[str, Any]) -> Chang
     return _changed(row)
 
 
+def _stored(values: Mapping[str, Any]) -> dict[str, Any]:
+    """Enum members become the strings Postgres stores."""
+    return {k: v.value if isinstance(v, Enum) else v for k, v in values.items()}
+
+
 async def update_item(
     conn: AsyncConnection,
     item_id: uuid.UUID,
@@ -372,11 +400,50 @@ async def update_item(
         await conn.execute(
             sa.update(schema.work_items)
             .where(wi.id == item_id, wi.version == expected_version)
-            .values(**values, version=wi.version + 1, updated_at=now)
+            .values(**_stored(values), version=wi.version + 1, updated_at=now)
             .returning(*_RETURNED)
         )
     ).first()
     return _changed(row) if row else None
+
+
+async def claim_item(
+    conn: AsyncConnection, item_id: uuid.UUID, values: Mapping[str, Any], now: datetime
+) -> ChangedItem | None:
+    """SPEC 6.1: the claim is ONE conditional UPDATE and its WHERE clause is the judge. Under
+    READ COMMITTED a second claimant waits for the first to commit, re-checks the WHERE against
+    the committed row, and matches nothing. None means it lost; the caller reads why."""
+    row = (
+        await conn.execute(
+            sa.update(schema.work_items)
+            .where(
+                wi.id == item_id,
+                wi.assignee_id.is_(None),
+                wi.status == ItemStatus.NEW.value,
+            )
+            .values(**_stored(values), version=wi.version + 1, updated_at=now, last_activity_at=now)
+            .returning(*_RETURNED)
+        )
+    ).first()
+    return _changed(row) if row else None
+
+
+async def lock_keys_owned_by(
+    conn: AsyncConnection, team_id: uuid.UUID, user_id: uuid.UUID, limit: int
+) -> list[str]:
+    """Keys of the open items this person works in this team, locked in id order (so two
+    commands that lock several items never wait on each other in a circle). Served by
+    work_items_assignee_open_idx. Deliberately not filtered by visibility (see
+    teams.count_open_items_owned): only a team lead or an admin reaches it."""
+    finished = [ItemStatus.RESOLVED.value, ItemStatus.CLOSED.value]
+    rows = await conn.execute(
+        sa.select(wi.key)
+        .where(wi.team_id == team_id, wi.assignee_id == user_id, wi.status.notin_(finished))
+        .order_by(wi.id)
+        .limit(limit)
+        .with_for_update()
+    )
+    return [str(k) for k in rows.scalars()]
 
 
 async def add_watcher(conn: AsyncConnection, item_id: uuid.UUID, user_id: uuid.UUID) -> None:

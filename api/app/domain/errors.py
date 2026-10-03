@@ -20,6 +20,7 @@ class DomainError(Exception):
         errors: list[dict[str, str]] | None = None,
         current: dict[str, Any] | None = None,
         changes_since: list[dict[str, Any]] | None = None,
+        extras: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(detail or self.title)
         self.detail = detail or self.title
@@ -27,6 +28,7 @@ class DomainError(Exception):
         self.errors = errors
         self.current = current
         self.changes_since = changes_since
+        self.extras = extras  # extension members of the problem body, e.g. who claimed it
 
 
 class ValidationFailed(DomainError):

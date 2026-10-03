@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request, Response
-from fastapi.responses import JSONResponse
 from pydantic import Field
 
 from app.api.constants import API_PREFIX
@@ -19,7 +18,7 @@ from app.api.idempotency import (
 )
 from app.api.pagination import ITEM_DEFAULT_LIMIT, ITEM_MAX_LIMIT
 from app.api.preconditions import ExpectedVersion, etag
-from app.api.problem import PROBLEM_JSON
+from app.api.responses import respond
 from app.api.schemas.items import (
     CreateItemRequest,
     EventOut,
@@ -68,22 +67,6 @@ ALLOWED_LIST_PARAMS = frozenset(
     }
 )
 FILTER_PARAMS = ALLOWED_LIST_PARAMS - {"sort", "cursor", "limit"}
-
-
-def _respond(outcome: Outcome, *, location: bool = False) -> JSONResponse:
-    """The stored (or fresh) answer as an HTTP response. Headers that depend on the body, ETag
-    and Location, are rebuilt from it, so a replay carries them too."""
-    headers: dict[str, str] = {}
-    if outcome.replayed:
-        headers["Idempotent-Replayed"] = "true"
-    if outcome.is_error:
-        return JSONResponse(
-            outcome.body, status_code=outcome.status, media_type=PROBLEM_JSON, headers=headers
-        )
-    headers["ETag"] = etag(outcome.body["version"])
-    if location:
-        headers["Location"] = f"{API_PREFIX}/items/{outcome.body['key']}"
-    return JSONResponse(outcome.body, status_code=outcome.status, headers=headers)
 
 
 def _assignee_or_requester(
@@ -204,7 +187,7 @@ async def create_item(
         request_fingerprint=await fingerprint(request),
         work=work,
     )
-    return _respond(outcome, location=True)
+    return respond(outcome, location=True)
 
 
 # ----- list, facets -------------------------------------------------------------------------
@@ -306,7 +289,7 @@ async def update_item(
         request_fingerprint=await fingerprint(request),
         work=work,
     )
-    return _respond(outcome)
+    return respond(outcome)
 
 
 # ----- history ------------------------------------------------------------------------------

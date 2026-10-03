@@ -186,6 +186,7 @@ def _error_outcome(error: DomainError, request_id: str | None) -> Outcome:
         errors=error.errors,
         current=error.current,
         changes_since=error.changes_since,
+        extras=error.extras,
     )
     return Outcome(error.status, body)
 
