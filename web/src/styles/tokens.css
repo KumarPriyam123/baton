@@ -1,0 +1,99 @@
+/*
+ * Baton design tokens (DESIGN §2). The only file that may contain raw colour values.
+ * Light ("day desk") is the default; dark ("night desk") follows the system, and the user
+ * menu can force either with data-theme="light" | "dark" on <html>.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* §2.1 colour */
+  --desk: #eef1ee;
+  --sheet: #ffffff;
+  --ink: #18212b;
+  --pencil: #5a6672;
+  --rule: #d9ded9;
+  --dispatch: #0b6e5f;
+  --dispatch-wash: #e3f1ee;
+  --on-dispatch: #ffffff;
+  --p0: #c42b1c;
+  --p1: #f2a93b; /* edge and fill */
+  --p1-text: #94570a; /* text */
+  --p2: #3d6b99;
+  --p3: #66707a;
+
+  /* Tints for chips and skeletons, derived so they follow both themes. */
+  --p0-wash: color-mix(in srgb, var(--p0) 11%, var(--sheet));
+  --p1-wash: color-mix(in srgb, var(--p1) 20%, var(--sheet));
+  --skeleton: color-mix(in srgb, var(--rule) 70%, var(--sheet));
+
+  /* §2.3 type */
+  --font-ui:
+    "Atkinson Hyperlegible Next Variable", "Atkinson Hyperlegible Next", "Segoe UI", system-ui,
+    sans-serif;
+
+  /* §2.4 shape and depth */
+  --r-chip: 4px;
+  --r-panel: 8px;
+  --shadow-pop: 0 8px 24px rgb(16 24 32 / 0.14);
+  --focus-ring: 2px solid var(--dispatch);
+
+  /* §2.5 motion */
+  --ease-pop: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-float: 160ms;
+  --dur-press: 100ms;
+}
+
+/* §2.2 dark */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --desk: #14191e;
+  --sheet: #1b2127;
+  --ink: #e6eaed;
+  --pencil: #9aa5af;
+  --rule: #2a3239;
+  --dispatch: #3fb39b;
+  --dispatch-wash: #1d2f2b;
+  --on-dispatch: #0e1a17;
+  --p0: #ff7a6e;
+  --p1: #f2a93b;
+  --p1-text: #f2a93b;
+  --p2: #86aeda;
+  --p3: #8c96a0;
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.4);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --desk: #14191e;
+    --sheet: #1b2127;
+    --ink: #e6eaed;
+    --pencil: #9aa5af;
+    --rule: #2a3239;
+    --dispatch: #3fb39b;
+    --dispatch-wash: #1d2f2b;
+    --on-dispatch: #0e1a17;
+    --p0: #ff7a6e;
+    --p1: #f2a93b;
+    --p1-text: #f2a93b;
+    --p2: #86aeda;
+    --p3: #8c96a0;
+    --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.4);
+  }
+}
+
+/* §2.5: with reduced motion, every transition and animation becomes instant. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-float: 0ms;
+    --dur-press: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+  }
+}

@@ -1,1 +1,142 @@
+@import "@fontsource-variable/atkinson-hyperlegible-next/wght.css";
 @import "tailwindcss";
+@import "./tokens.css";
+
+/*
+ * Tailwind v4 mapping. `--color-*: initial` drops the default palette so only Baton's tokens can
+ * be used: there is no way to reach for stone-900 or blue-500 by accident (DESIGN §1).
+ * `inline` makes utilities read the live CSS variable, so dark mode needs no `dark:` variants.
+ */
+@theme inline {
+  --color-*: initial;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-desk: var(--desk);
+  --color-sheet: var(--sheet);
+  --color-ink: var(--ink);
+  --color-pencil: var(--pencil);
+  --color-rule: var(--rule);
+  --color-dispatch: var(--dispatch);
+  --color-dispatch-wash: var(--dispatch-wash);
+  --color-on-dispatch: var(--on-dispatch);
+  --color-p0: var(--p0);
+  --color-p0-wash: var(--p0-wash);
+  --color-p1: var(--p1);
+  --color-p1-text: var(--p1-text);
+  --color-p1-wash: var(--p1-wash);
+  --color-p2: var(--p2);
+  --color-p3: var(--p3);
+  --color-skeleton: var(--skeleton);
+
+  --font-sans: var(--font-ui);
+
+  /* §2.3 type scale: size / line height. Weights 450 / 550 / 650 (variable font). */
+  --text-figure: 32px;
+  --text-figure--line-height: 36px;
+  --text-title: 24px;
+  --text-title--line-height: 30px;
+  --text-item: 20px;
+  --text-item--line-height: 26px;
+  --text-section: 15px;
+  --text-section--line-height: 20px;
+  --text-body: 14px;
+  --text-body--line-height: 20px;
+  --text-meta: 13px;
+  --text-meta--line-height: 18px;
+  --text-small: 12px;
+  --text-small--line-height: 16px;
+  --font-weight-body: 450;
+  --font-weight-strong: 550;
+  --font-weight-heading: 650;
+
+  --radius-chip: var(--r-chip);
+  --radius-panel: var(--r-panel);
+  --shadow-float: var(--shadow-pop);
+  --ease-float: var(--ease-pop);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--desk);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 450;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    margin: 0;
+    letter-spacing: -0.01em;
+    font-weight: 650;
+  }
+  /* §2.4: 2 px dispatch ring, 2 px offset, on every focusable element. */
+  :focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: 2px;
+  }
+  button {
+    font: inherit;
+    color: inherit;
+  }
+  ::selection {
+    background: var(--dispatch-wash);
+  }
+}
+
+/* Keys, counts, times and durations line up in columns (§2.3). */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Pending spinner: the only looping animation in the app (§2.5). */
+@keyframes baton-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: baton-spin 0.8s linear infinite;
+}
+
+/* Dialog and popover entrance: 160 ms, opacity + 8 px translate (§2.5). */
+@keyframes baton-float-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+.float-in {
+  animation: baton-float-in var(--dur-float) var(--ease-pop);
+}
+@keyframes baton-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+.fade-in {
+  animation: baton-fade-in var(--dur-float) linear;
+}
+
+/* Loading skeleton: a static block, no shimmer (no looping animation besides the spinner). */
+.skeleton {
+  background: var(--skeleton);
+  border-radius: var(--r-chip);
+}
+
+.sr-only-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
