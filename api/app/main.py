@@ -15,6 +15,7 @@ from app.api.routers import (
     item_commands,
     items,
     me,
+    overview,
     teams,
     users,
 )
@@ -56,6 +57,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(me.router)
+    app.include_router(overview.router)
     app.include_router(demo.router)
     app.include_router(teams.router)
     app.include_router(users.router)
