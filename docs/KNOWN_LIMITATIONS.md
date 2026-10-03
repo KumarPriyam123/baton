@@ -261,3 +261,7 @@ and a track with the "+N" collapsed middle were not looked at (the collapse has 
 output was not heard; the `aria-live` regions are written to (polite for live changes, assertive for the
 conflict dialog) and the track has an `ol` with the same facts, but nothing was run in a reader.
 Two React Compiler lint warnings from session A remain.
+
+## CI status
+
+At tag `submission-candidate-1`, CI (api, web, hygiene) is green on `main` (run 37149574243). The `web` job had been red since frontend session A because ESLint could not type-check `web/scripts/*.mjs`; fixed in `web/eslint.config.js`. The Playwright tests are not run in CI.
