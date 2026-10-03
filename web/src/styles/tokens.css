@@ -22,6 +22,17 @@
   --p2: #3d6b99;
   --p3: #66707a;
 
+  /* §2.6 avatar hues: eight muted colours, each >= 5.5 : 1 against white text, both themes. */
+  --on-hue: #ffffff;
+  --av-0: #9c4a2f;
+  --av-1: #7a5a0d;
+  --av-2: #3f6b1f;
+  --av-3: #1f6b6b;
+  --av-4: #3d6b99;
+  --av-5: #5b4a9e;
+  --av-6: #94457a;
+  --av-7: #5a6672;
+
   /* Tints for chips and skeletons, derived so they follow both themes. */
   --p0-wash: color-mix(in srgb, var(--p0) 11%, var(--sheet));
   --p1-wash: color-mix(in srgb, var(--p1) 20%, var(--sheet));

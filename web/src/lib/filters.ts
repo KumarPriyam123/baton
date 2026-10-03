@@ -136,8 +136,8 @@ export function hasNarrowing(filters: ListFilters): boolean {
   );
 }
 
-/** What the API accepts on GET /items: arrays repeat, `sort` is omitted for ranked search. */
-export function toApiQuery(filters: ListFilters) {
+/** Filter part of the query, shared by GET /items and GET /items/facets. */
+function filterQuery(filters: ListFilters) {
   return {
     ...(filters.team ? { team: filters.team } : {}),
     ...(filters.status.length ? { status: filters.status } : {}),
@@ -146,12 +146,31 @@ export function toApiQuery(filters: ListFilters) {
     ...(filters.assignee ? { assignee: filters.assignee } : {}),
     ...(filters.requester ? { requester: filters.requester } : {}),
     ...(filters.overdue ? { overdue: true } : {}),
-    ...(filters.q ? { q: filters.q } : { sort: filters.sort }),
+    ...(filters.q ? { q: filters.q } : {}),
   };
+}
+
+/** GET /items: ranked search takes no `sort` (the rank is the order), a plain list does. */
+export function toListQuery(filters: ListFilters) {
+  return { ...filterQuery(filters), ...(filters.q ? {} : { sort: filters.sort }) };
+}
+
+/** GET /items/facets rejects unknown parameters, so no `sort`. */
+export function toFacetQuery(filters: ListFilters) {
+  return filterQuery(filters);
 }
 
 export function isOpenSet(statuses: readonly Status[]): boolean {
   return (
     statuses.length === OPEN_STATUSES.length && OPEN_STATUSES.every((s) => statuses.includes(s))
   );
+}
+
+/** A change to the filters. An explicit `undefined` removes that filter. */
+export type FilterPatch = { [K in keyof ListFilters]?: ListFilters[K] | undefined };
+
+export function applyPatch(filters: ListFilters, patch: FilterPatch): ListFilters {
+  const merged = { ...filters, ...patch };
+  const defined = Object.entries(merged).filter(([, value]) => value !== undefined);
+  return Object.fromEntries(defined) as unknown as ListFilters;
 }

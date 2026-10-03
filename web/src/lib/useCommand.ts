@@ -93,7 +93,12 @@ export function useCommand<TInput, TResult>(
       refreshAfterCommand(qc);
     },
     onError: (error) => {
-      if (item && error instanceof ApiError && error.status === 404) removeItem(qc, item);
+      if (error instanceof ApiError) {
+        if (item && error.status === 404) removeItem(qc, item);
+        // A lost race or stale view: the server says what the item is now. Take it, then refresh.
+        if (error.current) upsertItem(qc, error.current);
+        if ([404, 409, 412].includes(error.status)) refreshAfterCommand(qc);
+      }
       if (onError?.(error) === true) return;
       notifyError(error);
     },

@@ -1,4 +1,5 @@
 /** SPEC §12 codes → what the user reads (DESIGN §6.2). Errors say what happened and what to do. */
+import { formatDistanceToNowStrict } from "date-fns";
 import { toast } from "sonner";
 
 import { ApiError, NetworkError } from "./api";
@@ -45,6 +46,20 @@ export function describeError(error: unknown): string {
   return `Something went wrong in Baton. Try again.${
     error.requestId ? ` Reference ${error.requestId}.` : ""
   }`;
+}
+
+interface Claimer {
+  claimed_by?: { name?: string };
+  claimed_at?: string;
+}
+
+/** "Asha took PAY-142 4 seconds ago." for a lost claim race (DESIGN §6.2). */
+export function describeClaimLost(error: ApiError, key: string): string {
+  const body = error.body as Claimer;
+  const name = body.claimed_by?.name;
+  if (!name) return error.detail;
+  const ago = body.claimed_at ? ` ${formatDistanceToNowStrict(new Date(body.claimed_at))} ago` : "";
+  return `${name} took ${key}${ago}.`;
 }
 
 export function notifyError(error: unknown): void {

@@ -27,6 +27,15 @@
   --color-p2: var(--p2);
   --color-p3: var(--p3);
   --color-skeleton: var(--skeleton);
+  --color-on-hue: var(--on-hue);
+  --color-av-0: var(--av-0);
+  --color-av-1: var(--av-1);
+  --color-av-2: var(--av-2);
+  --color-av-3: var(--av-3);
+  --color-av-4: var(--av-4);
+  --color-av-5: var(--av-5);
+  --color-av-6: var(--av-6);
+  --color-av-7: var(--av-7);
 
   --font-sans: var(--font-ui);
 
@@ -139,4 +148,55 @@
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+/* Rendered Markdown (description preview). Plain: Tailwind's reset removes list and heading styles. */
+.markdown > * + * {
+  margin-top: 0.5rem;
+}
+.markdown ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+.markdown ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  font-size: 15px;
+  line-height: 20px;
+}
+.markdown a {
+  color: var(--dispatch);
+  text-decoration: underline;
+}
+.markdown code {
+  border-radius: var(--r-chip);
+  background: var(--desk);
+  padding: 0 0.25rem;
+}
+.markdown pre {
+  overflow-x: auto;
+  border-radius: var(--r-chip);
+  background: var(--desk);
+  padding: 0.5rem 0.75rem;
+}
+.markdown pre code {
+  background: none;
+  padding: 0;
+}
+.markdown blockquote {
+  border-left: 2px solid var(--rule);
+  padding-left: 0.75rem;
+  color: var(--pencil);
+}
+.markdown table {
+  border-collapse: collapse;
+}
+.markdown th,
+.markdown td {
+  border: 1px solid var(--rule);
+  padding: 0.25rem 0.5rem;
 }
