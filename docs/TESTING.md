@@ -176,3 +176,9 @@ Facts worth knowing:
   with one, removing the invalidation would leave the race test green (the approve would refuse), and
   the invalidation is what the SPEC names as the guard.
 
+Review check (reviewer, not repeated by me): replacing `teams_repo.share_lock_role` with a plain read
+turned `test_claims_by_a_member_being_removed_leave_no_item_with_them` red in 3 of 3 runs and
+`test_assigning_someone_while_they_are_being_removed_never_leaves_them_owning_it` in 1 of 3. Race tests
+can only make a missing lock likely to show, not certain.
+
+Whole suite at the end of phase 4: 3,325 API tests (unit, db, integration, concurrency; none skipped; about 350 s) and 4 web tests.

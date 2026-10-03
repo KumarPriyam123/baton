@@ -4,25 +4,23 @@ Where the project stands, how to run it, and what to know before the next sessio
 
 ## Current state
 
-**Phase 3 (work items core) is done. Phase 4 has not started.** Tags: `phase-3-start`, `phase-3-done`.
+**Phase 4 (workflow, ownership, approvals) is done. Phase 5 has not started.** Tags: `phase-4-start`, `phase-4-done`.
 
-Repo: https://github.com/KumarPriyam123/baton (private). CI is green on `main` (api, web, hygiene): https://github.com/KumarPriyam123/baton/actions
+Repo: https://github.com/KumarPriyam123/baton (private). Phase 4 commits are local until pushed.
 
-What exists, on top of phases 0-2 (stack, schema, seed, identity, authorization):
+What exists, on top of phases 0-3:
 
-- **Command transaction** (`app/db/tx.py`): `command_tx` (one attempt: `SET LOCAL lock_timeout 2s / statement_timeout 5s`, database errors become domain errors) and `run_command` (restarts the whole command up to 3 times on 40001/40P01, then 503 BUSY). `record_event()` writes event + `last_event_id` + outbox row + NOTIFY, and refuses an item whose version differs from the row. `CommandTx.restamp()` re-reads the clock after a lock wait.
-- **Constraint mapping** (`app/db/errors.py`): named CHECKs and the one-pending index become SPEC 12 errors; a test fails if a new constraint is neither mapped nor declared a bug.
-- **Idempotency** (`app/api/idempotency.py`): SPEC 6.3 exactly (insert `ON CONFLICT DO NOTHING` in the command transaction, savepoint, store 2xx and domain 4xx, roll back on 5xx and BUSY). `POST /items` requires the key, `PATCH` takes it optionally.
-- **Items** (`app/repo/items.py`, `app/services/items.py`, `app/api/routers/items.py`): `POST /items`, `GET /items/{key}` (ETag, `allowed_actions`, `next_step`), `PATCH /items/{key}` (If-Match, 412 with `current` and `changes_since`), `GET /items` (filters, 4 sorts, keyset cursor, limit 50/100), `GET /items/facets`, `GET /items/{key}/events`.
-- **Workflow rules so far** (`app/domain/workflow.py`, pure): type defaults, due dates, `plan_edit` (what an edit changes, reasons, events), `required_actions`, `next_step` (full SPEC 4.5 table).
-- **Login, logout and membership** run on `command_tx`.
-- **Docs/API:** every operation id is the route function name; `/api/docs` is fully typed (`tests/unit/test_openapi.py`).
-- **Tests:** 3,129 API (unit, db, integration, concurrency) and 4 web; all need real Postgres and none skip. About 165 s.
+- **Workflow rules** (`app/domain/workflow.py`, pure): the SPEC 4.1 table as data (`TRANSITIONS`, one row per action and starting status), `evaluate` (state + payload: reasons, resolutions, duplicates, the approval gate of resolve), `available` and `allowed_actions` (= policy ∩ workflow), `plan_transition`, `plan_transfer`, `plan_removal_unassign`, `plan_edit` with approval invalidation, `claim_plan`.
+- **Commands** (`app/services/commands.py`): claim, release, assign (null unassigns), transition (block, unblock, resolve, reopen, close, withdraw), transfer, request/decide/cancel approval, and `unassign_owned_items` for membership changes. One shape: lock, policy, approvals, pending conflict, `If-Match`, workflow, write, `record_event` per planned event.
+- **Endpoints** (`app/api/routers/item_commands.py`): `POST /items/{key}/claim | release | assign | transition | transfer | approvals`, `.../approvals/{id}/decision | cancel`. All take an optional `Idempotency-Key`; the versioned ones require `If-Match`. `ALREADY_CLAIMED` carries `claimed_by` and `claimed_at`.
+- **Approvals** (`app/repo/approvals.py`): bound to the content by `subject_hash`; a material PATCH or a transfer invalidates every live approval in the same transaction; four-eyes is policy and the CHECK `approvals_four_eyes`.
+- **Membership** (`app/services/teams.py`): removing or demoting to viewer unassigns the person's open items in the same transaction (decision 14 is superseded).
+- **Tests:** 3,325 API tests (unit, db, integration, concurrency; none skipped; about 350 s) and 4 web tests, about 350 s, all needing real Postgres. Phase 4 added T-FLOW (720 cells), T-CLAIM (service and HTTP), T-APPROVE-RACE (50 rounds), the approval and membership races, the seed replay through `workflow.evaluate`, persona checks and per-clause UPDATE guards. Sabotage results: `docs/TESTING.md`.
 
-Verified in this phase: every Done-when item (see `docs/REQUIREMENTS_TRACE.md`), CI green, the real stack on port 8081 (migration 0004, create, replay, list, `/api/docs`), EXPLAIN on the large seed, an independent review (decision 34).
-**Still deferred:** `docker compose up` on port 8080 itself (another local project holds it); re-check at the phase 14 clean-clone run.
+Verified in this phase: every Done-when item (see `docs/REQUIREMENTS_TRACE.md`), the five sabotage rows (and why two of them needed more tests), the real stack through nginx on port 8081 (migration head 0004, claim, 409, 422 `APPROVAL_REQUIRED`, request, approve, events), an independent review (decision 45: four findings fixed, the rest left with reasons).
+**Still deferred:** `docker compose up` on port 8080 itself (another local project holds it); re-check at the phase 14 clean-clone run. **Not pushed:** nothing from phase 4 has been pushed, so CI has not run on it.
 
-Not built yet, by design: workflow commands (claim, assign, transitions, transfer, approvals), comments/watch/read, search, attention, notifications, the worker, SSE, the web UI, stats and decisions endpoints.
+Not built yet, by design: comments/watch/read, search, attention, notifications, the worker, SSE, the web UI, stats and decisions endpoints.
 
 ## Commands
 
@@ -70,29 +68,25 @@ curl -b jar 'localhost:8080/api/v1/items?status=new&sort=updated&limit=5'
 - **Unknown query parameters on `GET /items` are 400** (decision 29). Phase 5 adds `q`.
 - **The seed writes `work_items` and `item_events` directly** (decision 7). Application code must use `record_event()`; `tests/unit/test_single_writer.py` enforces it.
 - **ESLint is pinned to 9** until `eslint-plugin-jsx-a11y` supports 10.
+- **Never run two test sessions at once.** `tests/db` rebuilds the `public` schema of the shared test database at session start; a second run (or a subagent running tests while you do) can drop it under the first.
+- **A test that opens an asyncpg connection must close it** (`try/finally`, or `rows()` / `scalar()` in `tests/support/items.py`). Warnings are errors, so a leaked connection fails some other test later (`ResourceWarning: unclosed transport`).
+- **Race tests need distinct people.** `tests/support/workflow.py` has `extra_workers` (new PAY members with the shared test password), `many_clients` (one app, one signed-in client per email) and `released_together` lives in `tests/concurrency/test_workflow_concurrency.py`.
+- **Sabotage on a scratch branch from a committed tree**, restoring with `git checkout -- <file>`; the helper pattern is a tiny script that asserts the text occurs once before replacing it.
+- **The dev database now holds PAY-113**, created by the smoke test of the real stack. Re-seed (`seed --size demo --reset`) if a clean demo is wanted.
 - **Git identity** in this repo is `kpriyam2005p@gmail.com`; the account email is `k2005priyam@gmail.com`. Unconfirmed which is intended.
 
 ## Decisions that shape later phases
 
-Read `docs/ENGINEERING_DECISIONS.md` 23-34 before phase 4. In short:
+Read `docs/ENGINEERING_DECISIONS.md` 35-45 before phase 5. In short:
 
-- `command_tx` is one attempt, `run_command` retries; the work function must be safe to run again (24).
-- One outbox row and one NOTIFY **per event**, payload `{event_ids: [id], request_id}` (25; SPEC 6.4 and 9 updated).
-- A PATCH writes one `field_changed` for the plain fields plus separate `priority_changed`, `confidential_changed`, `requires_approval_changed`, all at the new version; no-op edits write nothing (26).
-- **Material edits are refused with 409 while an approval is on record; phase 4 replaces that with invalidation** (27).
-- Create body, list parameters, cursors and facets semantics (28, 29); `next_step` is complete (30); idempotency details (31).
-- Pages are cut before they are decorated; the admin unfiltered list still sorts the whole table (32).
-- **Open for phase 10:** whether a replayed 412 under a reused key is acceptable (decision 34). Until decided, the web client must create a new key for every changed request, including each rebase.
+- Order of checks in every command: not visible 404 → policy 403 → (request_approval only) pending approval 409 → `If-Match` 412 → workflow 409/422/400 (35).
+- Decision events always carry a reason: the note, or "Approved" / "Closed after resolution" (36).
+- A material edit or a transfer invalidates every live approval, not only the latest (37). A transfer answers with the item even if the lead can no longer see it (38).
+- The claim UPDATE's WHERE is the only judge of claim state; two of its clauses are redundant for the race and tested one by one (39, 41). `approve` has no second hash check on purpose (40).
+- New owners are checked against their membership row under a share lock (42). `Resolve` is offered without an approval and answers 422 (43). Unassign on membership change is batched; deactivation has no endpoint yet (44).
+- Still open for phase 10: whether a replayed 412 under a reused key is acceptable (34). The web client must create a new key for every changed request, including each rebase.
 
 ## Open items for the next phases
-
-**Phase 4 (workflow, ownership, approvals)** (BUILD_PLAN Phase 4 is updated)
-- **A PATCH of a material field invalidates a pending or approved approval in the same transaction** (SPEC 4.4), replacing decision 27: remove the refusal in `workflow.plan_edit` (`has_live_approval`), restore `edit_text`/`edit_type` in `allowed_actions` (`services/items.py` `_available`), and update `test_editing_the_text_of_an_item_with_an_approval_is_refused_until_phase_4` and the allowed-actions assertions.
-- **Replace the membership refusal with the automatic unassign** of SPEC 4.3b (`app/services/teams.py` `_refuse_if_owns_open_items`, decision 14); the tests in `tests/integration/test_teams_members.py` that expect 409 change. It runs inside `run_command` already and must call `record_event`.
-- New commands use `run_idempotent` + `run_command`, `lock_by_key` first, `record_event` for every event, and `workflow.py` for validity. `allowed_actions` is policy and workflow merged (`build_view`). `policy.can()` stays about people.
-- Lock order: item first, then approvals (SPEC 6.4). The `approvals_item_idx` index (migration 0004) exists for the newest-approval and "live approval" lookups.
-- Add the SPEC 13.1 test that replays a seeded sample through `workflow.py`.
-- Sabotage rows of BUILD_PLAN Phase 4 go in `docs/TESTING.md`. Remember: commit before sabotaging.
 
 **Phase 5**
 - `GET /stats/teams` and `GET /decisions` are **not** built here; they moved to phase 11 (BUILD_PLAN updated).
@@ -115,4 +109,4 @@ Read `docs/ENGINEERING_DECISIONS.md` 23-34 before phase 4. In short:
 
 ## Next phase
 
-Phase 4: workflow, ownership and approvals (SPEC 4 and 6.1): the transition table in `workflow.py`, atomic claim, assign/release/unassign, transitions, transfer, approvals with content-bound hashes, and the invalidation that replaces decision 27.
+Phase 5: collaboration, attention, search, dashboard API (SPEC 7, 8 and the comment, watch and read endpoints of SPEC 11). Comments write a `commented` event through `record_event` with the current version (it never bumps). `allowed_actions` already lists `comment` and `watch`.

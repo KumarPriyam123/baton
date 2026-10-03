@@ -38,10 +38,23 @@ failures a month ago plus one today lock the account.
 - **What it would take:** store the time of the first failure of the current run and reset the count
   when it is older than a window.
 
-## Membership removal is refused while the person owns open items
+## Deactivating a user does not unassign their items yet
 
-SPEC 4.3b wants those items unassigned automatically. Until the workflow exists (phase 4), a lead must
-reassign or release them first (ENGINEERING_DECISIONS 14).
+SPEC 4.3b lists deactivation next to removal and demotion, but SPEC 11 has no endpoint to deactivate
+anyone (accounts are deactivated in the database). Removal and demotion unassign the person's open
+items (ENGINEERING_DECISIONS 44); a deactivated account keeps what it owns.
+
+- **What it would take:** the deactivate command calls `commands.unassign_owned_items` for each of
+  the person's teams in the same transaction.
+
+## Removing someone who owns thousands of items is one long transaction
+
+The unassign runs in the membership command's transaction, 100 items per round (I8), and an item
+takes about eight statements. Someone with a few hundred open items is fine; thousands would approach the
+5 s statement and 2 s lock timeouts for the other commands waiting on those rows.
+
+- **What it would take:** a worker job that unassigns in batches, with the membership change marking the
+  person "leaving"; costs the "same transaction" guarantee, so only worth it at that scale.
 
 ## The user directory is open to every signed-in user and uses a sequential scan
 
@@ -55,11 +68,6 @@ digit in the email (`aarav.gupta17@...` is generated, `priya.lead@...` is not).
 SPEC 6.3 says keys expire after 24 hours, which the phase 6 cleanup job enforces. Until then a key
 is honoured for as long as its row exists. Browsers create a fresh random key per action, so this
 only matters for a client that reuses keys.
-
-## Material edits are refused while an approval is on record (until phase 4)
-
-See ENGINEERING_DECISIONS 27. Editing the title, description or type of an item that has a pending
-or approved approval is a 409 for now, instead of invalidating the approval.
 
 ## An admin's unfiltered item list sorts the whole table
 
@@ -78,8 +86,31 @@ demoted while their PATCH waits (at most the 2 s lock timeout), that PATCH is st
 old role. The next request sees the change (SPEC 5.3 holds). Re-reading the role after the lock would
 close the window for one extra query per command.
 
+The one place where this would break SPEC 4.3b is closed: whoever becomes an owner (claim, assign,
+reopen to the previous owner, transfer) has their role read again under a share lock on their
+membership row (ENGINEERING_DECISIONS 42), so a removed person cannot end up owning an item.
+
 ## A replayed 412 can outlive the reason it was a 412
 
 An idempotency key stores a 412 for 24 h and `If-Match` is not part of the fingerprint
 (ENGINEERING_DECISIONS 34). A client that rebases and re-sends under the same key is told the old
 answer. The web client must create a new key whenever the request changes.
+
+## A removal and a claim can deadlock, and one of them is retried
+
+A command that makes someone the owner locks the item row and then reads their membership under a
+share lock; removing or demoting that person locks the membership row and then their items
+(ENGINEERING_DECISIONS 42). The two orders can deadlock. Postgres picks a victim and `run_command`
+restarts it (up to three times, then 503 BUSY). It is rare and always resolved; the alternative, one
+global order, would mean locking memberships before every item command.
+
+## A second approval request is "already pending" even if the caller's view is stale
+
+SPEC 6.2 requires `If-Match` on `request_approval`. When an approval is already waiting, the answer is
+409 `APPROVAL_ALREADY_PENDING` before the version is compared (ENGINEERING_DECISIONS 35), so a client
+that was also out of date learns about the wait first and about the other changes on its refetch.
+
+## Cancelled and invalidated approvals share one reason column
+
+`approvals.invalidated_reason` also holds why a request was cancelled by the system ("transferred",
+"Removed from Payments"). The SPEC 3.2 table has no separate column; the events carry the same text.

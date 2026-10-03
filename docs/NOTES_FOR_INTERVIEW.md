@@ -212,6 +212,44 @@ Each entry: **problem → root cause → fix → lesson**.
 
 **10. Heredocs and quotes again** (see phase 2, problem 8): scripts with apostrophes failed to parse in Git Bash. Files and edits go through the Write and Edit tools.
 
+### Phase 4
+
+**1. A sabotage row from the plan did not go red**
+- Problem: removing `assignee_id IS NULL` from the claim UPDATE left T-CLAIM green; removing `version = :expected` left T-STALE green.
+- Root cause: the claim WHERE also has `status = 'new'`, which the winner changes in the same statement, so either clause alone stops twenty claimants; the version is compared twice (Python under the lock, and in the UPDATE).
+- Fix: tests that take each clause on its own (a `new` item with an owner; `update_item` on a stale version; a stale edit that changes nothing). Now each clause turns exactly one test red (TESTING.md; decision 41).
+- Lesson: when a guard is doubled, test each half directly, or "remove the guard" proves nothing.
+
+**2. Locking first would have hidden the claim guard**
+- Problem: SPEC 6.4 says lock the row, then judge in Python; SPEC 6.1 says the conditional UPDATE decides a race. Doing both means the Python check after the lock catches every loser and the UPDATE's WHERE is never what decides.
+- Fix: the claim locks and checks policy but does not pre-check state; the UPDATE's WHERE is the only judge, and its rule is also a row of the transition table so `allowed_actions` and T-FLOW agree (decision 39).
+
+**3. The test the plan asked for contradicted the rule it sits next to**
+- Problem: two concurrent `request_approval` calls must give one 201 and one 409, but SPEC 6.2 requires `If-Match` on it, so the loser's stale version would be 412.
+- Fix: asked Kumar; the pending-approval check runs before the version check (decision 35).
+
+**4. A review finding I would not have found: the lock statement joined `teams`**
+- Problem: a command that waited for the row lock while a transfer committed got "item doesn't exist".
+- Root cause: `SELECT ... FOR UPDATE OF work_items` over a join; after the wait Postgres re-checks the whole row version against the old snapshot, and the join to the old team row no longer matched.
+- Fix: lock `work_items` alone, read team and pending approval in a second statement. A test holds the lock from another connection while the team changes (`test_item_commands_edges.py`).
+- Lesson: in READ COMMITTED, anything read in the same statement as `FOR UPDATE` can be stale after a wait. Lock first, read after.
+
+**5. The review's other findings**
+- A member releasing a confidential item got a 404 and the release rolled back, because the answer was rendered through the visibility filter after the change took her right to see it. Every command now renders without the filter for the person who ran it.
+- `duplicate_of` showed the key of an item the viewer cannot see.
+- Both were untested because no test ran any workflow command on a confidential or hidden item.
+
+**6. My persona test modelled people as having one relationship**
+- Problem: Priya was offered `withdraw` on a `new` item. The code was right: she had raised it, and a requester may withdraw.
+- Fix: relationships stack (lead + requester); the expected set is the union of the table's cells.
+
+**7. A leaked database connection failed an unrelated test**
+- Problem: `ResourceWarning: unclosed transport` (warnings are errors) appeared in five approval tests after I used `await seeded.connect()` without closing it.
+- Fix: use the `rows()` helper, which closes. Lesson in HANDOFF hazards.
+
+**8. Smaller ones**
+- `PlannedEvent` was used in an annotation before it was defined (found by reading, before the first run); the single-writer scanner flagged the word NOTIFY in a comment; mypy cannot infer lambdas passed to a generic racer helper (replaced by `functools.partial`); after a cancel, a second cancel is 403 for a member and 409 for a lead because policy asks who "asked" the pending request (decision 43).
+
 ## Explain this phase
 
 ### Phase 0: foundation
@@ -268,3 +306,17 @@ Each entry: **problem → root cause → fix → lesson**.
 8. **What breaks if the main guards go.** No `ON CONFLICT`: ten concurrent creates fail or double (T-IDEM red). No version checks: ten edits all succeed and lose each other (T-STALE red). No visibility clause: a Compliance member lists confidential items. No `COALESCE` in the cursor: items without a due date are skipped or repeated across pages.
 9. **Honest gaps.** A replayed 412 can outlive its reason because `If-Match` is not in the fingerprint (decision 34, open); material edits are refused while an approval is on record until phase 4 (decision 27); an admin's unfiltered list sorts the whole table (phase 12); old idempotency keys wait for the phase 6 cleanup.
 10. **Numbers.** 3,129 API + 4 web tests, none skipped, about 165 s. List 3-12 ms and facets 9-35 ms on 50,000 items for leads and members.
+
+
+### Phase 4: workflow, ownership, approvals
+
+1. **What was built.** The SPEC 4.1 transition table as data, eight commands (claim, release, assign/unassign, six transitions, transfer, request/decide/cancel approval) with one shape, approvals bound to the content by a hash, and the automatic unassign when someone leaves a team.
+2. **Key decision: the claim is one conditional UPDATE, and its WHERE clause is the only judge.** `WHERE id = :id AND assignee_id IS NULL AND status = 'new'` (`api/app/repo/items.py:421-432`). A second claimant waits for the first to commit, re-checks the WHERE against the committed row and matches nothing; it then reads who won and answers 409 with the owner and time (`services/commands.py:154`).
+3. **Alternative.** SELECT the item, check it is free in Python, then UPDATE. Two requests can both pass the check. Locking first narrows that, but then the Python check, not the SQL, decides, and the SQL guard is decoration.
+4. **What breaks if it is removed.** Twenty simultaneous claims all return 200 and the last write wins (T-CLAIM red, both service and HTTP flavours, observed).
+5. **Second key decision: an approval is bound to the content it covers.** `subject_hash` of team, type, title, description is stored when approval is requested; any PATCH that changes one of them, or a transfer, invalidates every pending or stale approved approval in the same transaction (`domain/workflow.py:341`, applied in `services/items.py`).
+6. **Alternative.** Check the hash only when approving, or when resolving. The item can still sit in "approved" on text nobody reviewed, and the history lies. Remove the invalidation and T-APPROVE-RACE goes red; approve has no second hash check on purpose (decision 40).
+7. **The approver's view is checked, not just the approval.** `approve` needs `If-Match` (`services/commands.py:415`): if anything changed since the lead opened the item, they get 412 with `changes_since` and nothing is approved. Remove that check and five tests go red.
+8. **Rules live in one pure module.** `TRANSITIONS` (`domain/workflow.py:368`) has one row per action and starting status; `evaluate` (`:494`) adds reasons, resolutions and the approval gate; T-FLOW checks 720 cells against a table typed by hand, and the table equals the seed simulator's independent copy. Resolving a payment item without an approval is 422 `APPROVAL_REQUIRED` (`:515`).
+9. **Honest gaps.** Deactivating a user has no endpoint, so nothing unassigns for it; removing someone with thousands of items is one long transaction; a removal and a claim can deadlock and one is retried; a request for approval is "already pending" before it is "stale" (KNOWN_LIMITATIONS, decisions 35-45).
+10. **Numbers.** 3,325 API + 4 web tests, none skipped, about 350 s. The independent review found four defects, all fixed with tests that fail on the old code.

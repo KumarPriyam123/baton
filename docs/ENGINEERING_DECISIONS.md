@@ -385,3 +385,40 @@ possible; `run_command` retries it (40P01, up to 3 times). Tested by two race te
 membership transaction (I8). SPEC 4.3b also lists deactivating an account; there is no deactivate
 endpoint in SPEC 11, so nothing calls it for that case. When one exists it must call this function for
 each of the person's teams in the same transaction as the deactivation.
+
+## 45. Phase 4 review: what an independent reviewer found, and what was decided
+
+A reviewer that had not seen the session read `git diff phase-4-start..HEAD` and probed the code
+against real Postgres. I reproduced each finding before changing anything.
+
+Fixed (commit "fix(api): findings of the independent review of phase 4"):
+
+- **High: a member could not release an item she could no longer see afterwards.** `release` answered
+  through the visibility filter; once the item was unassigned (and confidential, which every
+  compliance request is) she could not see it, so the answer was a 404 and the release was rolled back.
+  Every command now renders its answer for the person who ran it without the filter (they were
+  authorised first); `allowed_actions` comes out empty when they can no longer see it. This
+  generalises decision 38 from transfer to all commands.
+- **Medium: a command that waited for the row lock could be told the item did not exist.** The lock
+  statement joined `teams`; after a concurrent transfer committed, Postgres re-checked the join against
+  the old team and returned no row. `lock_by_key` now locks `work_items` alone and reads the team and
+  the pending approval in a second statement (which also removes finding 4 below).
+- **Medium: `duplicate_of` showed the key of an original the viewer cannot see.** The join in the item
+  query now applies the visibility rule to the original (`visibility_clause(ctx, columns)`).
+- **Low: the pending approval's requester was read in the locking statement,** so after a wait it came
+  from the old snapshot and policy could see NULL. Now read after the lock (same change as above).
+- Test gaps closed: hidden items for all eight commands, a lock held by another transaction (404 at
+  once, not a wait), a transfer that commits while a command waits, confidential items end to end, and
+  replays of claim, a lost claim, decision, request, cancel and transfer under one key.
+
+Not changed:
+
+- **`unassign_owned_items` has no overall bound** (about eight statements per item, one transaction).
+  Known and written up in KNOWN_LIMITATIONS; the batch of 100 bounds memory, not time.
+- **Share-lock sabotage is only probabilistic.** Replacing `share_lock_role` with a plain read made
+  `test_claims_by_a_member_being_removed...` fail 3 of 3 runs and
+  `test_assigning_someone_while_they_are_being_removed...` 1 of 3 (reviewer's measurement). Both pass
+  with the lock. Accepted: a race test cannot be made certain, and the claim one is.
+- **T-FLOW drives `allowed_actions`**, not `evaluate` per cell, and uses non-confidential facts. The
+  `evaluate` rules (reasons, resolutions, approval gate) have their own tests; confidentiality is
+  covered by the new edge tests.

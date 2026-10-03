@@ -48,6 +48,20 @@ Also proven: sessions (hash only stored, idle expiry, deactivation and role chan
 
 CI: https://github.com/KumarPriyam123/baton/actions (see HANDOFF for the run of `phase-3-done`). 3,129 API + 4 web tests, none skipped. EXPLAIN on the large seed: ENGINEERING_DECISIONS 32.
 
+## Phase 4: workflow, ownership, approvals (carries CB1, CB4, CB5, K1, T3 four-eyes, E4, E7)
+
+| Done-when | Status | Proof |
+|---|---|---|
+| Removing or demoting a member unassigns their open items in the same transaction (replaces decision 14) | ☑ | `tests/integration/test_membership_unassigns.py`: every open state goes back to `new` with `unassigned` + `status_changed` at one new version, a waiting approval is cancelled first with the same reason, resolved items and other teams are untouched, a failure after the unassign rolls everything back, demoting a lead to member unassigns nothing. Races: `tests/concurrency/test_workflow_concurrency.py::test_assigning_someone_while_they_are_being_removed...`, `::test_claims_by_a_member_being_removed...` |
+| A PATCH of a material field invalidates a pending or approved approval in the same transaction (replaces decision 27) | ☑ | `test_items_patch.py::test_editing_the_text_of_an_item_with_an_approval_invalidates_it_in_the_same_command` (one version bump, `field_changed` + `approval_invalidated` at it), `test_item_approvals.py` (waiting request, approved request, type change), `tests/unit/test_workflow_edit.py` (every stale approval, not only the latest) |
+| All tests pass, and every sabotage row was observed red | ☑ | 3,325 API + 4 web tests, none skipped. Sabotage table in `docs/TESTING.md`: all five rows observed red; two clauses needed their own tests because T-CLAIM and T-STALE stay green without them (decision 41) |
+| `GET /items/{key}` has correct `allowed_actions` and `next_step` for each demo persona | ☑ | `tests/integration/test_item_personas.py`: ten personas on a sample of seeded Payments items, compared with the hand-typed SPEC table; `next_step` for the approver, a viewer and a new P0 item |
+| Independent review run, confirmed findings fixed | ☑ | ENGINEERING_DECISIONS 45: a release that 404ed and rolled back, a lock query that hid a transferred item, a leaked `duplicate_of`, a stale approval requester; fixed with tests that fail on the old code |
+
+Plan tests: **T-FLOW** `tests/unit/test_workflow_flow.py` (15 actions x 6 statuses x 8 relationships, plus the table equals the seed simulator's copy). **T-CLAIM** `tests/concurrency/test_workflow_concurrency.py::test_claim_twenty_concurrent_requests_exactly_one_wins` (20 connections, `asyncio.Barrier`; one winner, nineteen `ALREADY_CLAIMED`, one `assigned` event, version + 1) and the HTTP twin. **T-APPROVE-RACE** `::test_approve_racing_an_edit_never_leaves_an_approval_on_content_nobody_reviewed` (50 rounds). `APPROVAL_REQUIRED`: `test_item_transitions.py`. Four-eyes: policy 403 and, with policy bypassed, the CHECK (`test_item_approvals.py`). Two requests at once: one 201, one 409 (`::test_two_requests_for_approval_at_once...`). Transfer: `test_item_transfer.py`. Release while awaiting approval: `test_item_ownership.py`. Seeded histories replay through `workflow.evaluate`: `tests/unit/test_seed_replay_workflow.py`.
+
+Real stack through nginx on port 8081 (migration head 0004): claim, a losing claim (409 with owner), resolve without approval (422), request, approve, events.
+
 ## The situation (pain points the product must fix)
 
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
@@ -65,13 +79,13 @@ CI: https://github.com/KumarPriyam123/baton/actions (see HANDOFF for the run of 
 
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
 |---|---|---|---|---|---|
-| E1 | Create and manage work items for investigation, action or resolution | six item types with defaults; full lifecycle | 3, 4 | API tests; E2E create | ◐ phase 3: create, read, edit, list with type defaults; workflow in phase 4 |
+| E1 | Create and manage work items for investigation, action or resolution | six item types with defaults; full lifecycle | 3, 4 | API tests; E2E create | ◐ phases 3-4: create, read, edit, list, and the whole workflow (claim to close, transfer, approvals); UI in 8-10 |
 | E2 | Understand what the item is and why it exists | title, description, type, requester, created context | 3, 10 | detail screenshot | ☐ |
 | E3 | Its current state and importance | status (shape + word), priority, SLA state | 3, 10 | detail screenshot | ☐ |
-| E4 | Who is responsible | owner + team, handoff track | 4, 10 | detail screenshot | ☐ |
+| E4 | Who is responsible | owner + team, handoff track | 4, 10 | detail screenshot | ◐ phase 4: owner, claim, assign, release, transfer and the `assigned`/`unassigned`/`transferred` events; UI in 10 |
 | E5 | What has happened previously | append-only timeline, decisions with reasons | 3, 5, 10 | event invariant test | ◐ phase 3: every change is an event (`record_event`), timeline endpoint `GET /items/{key}/events`; comments in phase 5 |
 | E6 | What requires attention next | `next_step` on every item; Inbox sections | 4, 5, 9 | next_step tests | ◐ phase 3: `next_step` implemented (SPEC 4.5, unit-tested) and returned on every item; Inbox in 5 and 9 |
-| E7 | Different users on the same item at about the same time behave sensibly | CB1, CB2, CB3, CB5, CB8 | 3, 4, 10 | concurrency tests; two-user E2E | ◐ phase 3: CB2 and CB3 proven; CB1 and CB5 in phase 4 |
+| E7 | Different users on the same item at about the same time behave sensibly | CB1, CB2, CB3, CB5, CB8 | 3, 4, 10 | concurrency tests; two-user E2E | ◐ phases 3-4: CB1, CB2, CB3, CB5 proven on the server; UI in 10 |
 
 ## Teams, identity and access
 
@@ -79,7 +93,7 @@ CI: https://github.com/KumarPriyam123/baton/actions (see HANDOFF for the run of 
 |---|---|---|---|---|---|
 | T1 | Multiple teams; a user may be in several with different responsibilities | memberships with a role per team | 1, 2 | policy matrix tests | ◐ phase 1: `memberships`, demo personas hold different roles in different teams; policy tests in phase 2 |
 | T2 | Not every user can perform every action | permission matrix SPEC §5.2 | 2, 4 | policy matrix tests | ◐ phase 2: the full matrix is proven in the policy module; endpoints enforce it as they are built (3, 4) |
-| T3 | Meaningful authorization model | team roles + resource rules (requester, assignee, confidential, four-eyes) | 2, 4 | policy matrix; T-VIS | ◐ phase 2: policy matrix and T-VIS parity proven; four-eyes decided with the approval workflow in phase 4 |
+| T3 | Meaningful authorization model | team roles + resource rules (requester, assignee, confidential, four-eyes) | 2, 4 | policy matrix; T-VIS | ◐ phase 2: policy matrix and T-VIS parity proven; four-eyes proven in phase 4 (policy and the CHECK) |
 | T4 | Enforced by the system, not only by hiding UI controls | server policy + SQL visibility clause; 404 for invisible | 2, 5, 11 | T-VIS; E2E viewer direct API 403 | ◐ phase 2: server-side policy, SQL clause, 403 on membership routes, CSRF, sessions; item and list endpoints in 3 and 5 |
 
 ## Collaboration and history
@@ -94,7 +108,7 @@ CI: https://github.com/KumarPriyam123/baton/actions (see HANDOFF for the run of 
 
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
 |---|---|---|---|---|---|
-| K1 | Two users try to take responsibility for the same work | atomic conditional claim | 4 | T-CLAIM; E2E claim race | ☐ |
+| K1 | Two users try to take responsibility for the same work | atomic conditional claim | 4 | T-CLAIM; E2E claim race | ◐ phase 4: T-CLAIM proven (service and HTTP); E2E in 13 |
 | K2 | One user views information another just changed | live updates; version guard; stale banner; If-Match on intent-dependent actions | 3, 7, 10 | SSE tests; E2E live update | ◐ phase 3: ETag, version guard on the server side; SSE in phase 7 |
 | K3 | Multiple updates within a short period | row lock + versions (no lost updates); per-item client mutation queue; event coalescing | 3, 9, 10 | T-STALE; vitest scope test | ◐ phase 3: row lock + versions proven (10 edits on one version: 1 wins); client queue in 9 and 10 |
 | K4 | A user repeats an action, unsure if the first succeeded | idempotency keys in the same transaction; same key on retries | 3, 9 | T-IDEM; E2E double-submit | ◐ phase 3: T-IDEM proven on the server; client key per action in phase 9 |
@@ -130,10 +144,10 @@ CI: https://github.com/KumarPriyam123/baton/actions (see HANDOFF for the run of 
 | ID | Area | Where it's shown | Proof | Status |
 |---|---|---|---|---|
 | G1 | Data modelling | SPEC §3; constraints; event log | schema tests; Decision #5 | ◐ phase 1: schema, 28 named guards, index inventory, drift tests proven; the write-up (Decision #5) in phase 14 |
-| G2 | API design | commands vs PATCH, ETag/If-Match, problem+json, idempotency, keyset cursors | OpenAPI; Decision #3 | ◐ phase 3: ETag/If-Match, problem+json, idempotency, keyset cursors, stable operation ids; commands in 4 |
+| G2 | API design | commands vs PATCH, ETag/If-Match, problem+json, idempotency, keyset cursors | OpenAPI; Decision #3 | ◐ phase 3: ETag/If-Match, problem+json, idempotency, keyset cursors, stable operation ids; commands in phase 4 (claim, assign, transition, transfer, approvals; ETag on every answer) |
 | G3 | Frontend state management | TanStack Query, version merge, mutation scopes, rebase | vitest suite | ☐ |
 | G4 | Authorization | policy + visibility clause | policy matrix; T-VIS | ☑ phase 2 (policy matrix, T-VIS parity; per-endpoint enforcement is tracked under T2-T4) |
-| G5 | Concurrent operations | CB1–CB3, CB5 | concurrency tests | ◐ phase 3: CB2 and CB3 proven |
+| G5 | Concurrent operations | CB1–CB3, CB5 | concurrency tests | ◐ phases 3-4: CB1, CB2, CB3, CB5 proven |
 | G6 | Error handling | SPEC §12 mapping; timeouts; retries; designed error states | failure drills | ◐ phases 2 and 3: every SPEC 12 code; lock/statement timeouts become 503 BUSY with Retry-After; deadlock retry; constraint violations become domain errors |
 | G7 | Data consistency | single transaction per command; outbox; DB constraints | event invariant; rollback test | ◐ phases 1 and 3: one transaction per command with the idempotency key inside it; outbox row in the same transaction; failed commands leave nothing; worker in 6 |
 | G8 | Search and filtering | FTS + trigram + facets + URL filters | search tests | ☐ |
@@ -145,11 +159,11 @@ CI: https://github.com/KumarPriyam123/baton/actions (see HANDOFF for the run of 
 
 | ID | Brief example | Baton | Test | Status |
 |---|---|---|---|---|
-| CB1 | Simultaneous actions by multiple users | atomic claim | T-CLAIM | ☐ |
+| CB1 | Simultaneous actions by multiple users | atomic claim | T-CLAIM | ◐ phase 4 proven (T-CLAIM); demo in 10 |
 | CB2 | Handling stale information | versions + If-Match | T-STALE | ◐ phase 3 proven (T-STALE); demo in 10 |
 | CB3 | Preventing accidental duplicate operations | idempotency keys | T-IDEM | ◐ phase 3 proven (T-IDEM); demo in 9 |
-| CB4 | Enforcing workflow rules | workflow module + DB constraints | T-FLOW | ☐ |
-| CB5 | (beyond the examples) approvals bound to content | subject hash + invalidation | T-APPROVE-RACE | ☐ |
+| CB4 | Enforcing workflow rules | workflow module + DB constraints | T-FLOW | ◐ phase 4 proven (T-FLOW, `APPROVAL_REQUIRED`); demo in 10 |
+| CB5 | (beyond the examples) approvals bound to content | subject hash + invalidation | T-APPROVE-RACE | ◐ phase 4 proven (T-APPROVE-RACE, 50 rounds); demo in 10 |
 | CB6 | Authorization at the resource level | confidential, requester, four-eyes, 404 | T-VIS | ◐ phases 2 and 3: SQL and Python agree (T-VIS); list, facets and events checked over HTTP; search, attention and notifications in phase 5 |
 | CB7 | Reliable asynchronous processing | outbox + SKIP LOCKED + idempotent handlers | T-OUTBOX | ☐ |
 | CB8 | Reconciling optimistic frontend state with server decisions | version merge, scopes, rebase, rollback | T-RECONCILE + E2E | ☐ |
