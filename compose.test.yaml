@@ -41,4 +41,7 @@ services:
     build:
       context: ./web
       target: test
+    # Same reason as api-test: never test a stale image. node_modules stays in the image.
+    volumes:
+      - ./web/src:/app/src
     command: ["npm", "run", "test"]
