@@ -121,7 +121,7 @@ async def fingerprint(request: Request) -> str:
     except ValueError:
         canonical = raw.decode("utf-8", errors="replace")
     material = f"{request.method}\n{request.url.path}\n{canonical}"
-    return hashlib.sha256(material.encode()).hexdigest()
+    return hashlib.sha256(material.encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
 Work = Callable[[CommandTx], Awaitable[Outcome]]

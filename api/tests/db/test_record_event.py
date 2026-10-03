@@ -44,7 +44,9 @@ async def world(scratch_url: str) -> AsyncIterator[World]:
     try:
         await conn.execute("TRUNCATE users, teams, memberships, work_items, item_events CASCADE")
         await conn.execute("TRUNCATE outbox")
-        yield await make_world(conn)
+        made = await make_world(conn)
+        await conn.execute("UPDATE work_items SET version = 4")  # the item has been edited
+        yield made
     finally:
         await conn.close()
 
@@ -190,7 +192,7 @@ async def test_it_notifies_listeners_with_the_spec_payload_only_after_commit(
         async def work(command: tx.CommandTx) -> int:
             event_id = await tx.record_event(
                 command,
-                subject(world, version=5, assignee_id=None, confidential=True),
+                subject(world, assignee_id=None, confidential=True),
                 EventKind.FIELD_CHANGED,
             )
             await asyncio.sleep(0.2)  # a window in which the transaction is still open
@@ -206,7 +208,7 @@ async def test_it_notifies_listeners_with_the_spec_payload_only_after_commit(
     assert notice == {
         "event_id": event_id,
         "item_id": str(world.item_id),
-        "version": 5,
+        "version": 4,
         "team_id": str(world.team.id),
         "prev_team_id": None,
         "requester_id": str(world.requester),
@@ -264,3 +266,35 @@ async def test_the_event_kind_must_be_one_the_schema_knows(
     async with engine.connect() as conn:
         with pytest.raises(sa.exc.IntegrityError):  # item_events_kind_valid: a bug, not a 4xx
             await tx.run_command(conn, work)
+
+
+async def test_an_event_that_names_the_wrong_version_is_refused_and_rolls_everything_back(
+    engine: AsyncEngine, world: World, scratch_url: str
+) -> None:
+    """I2: the event's version must be the version the row has. A caller that passes a stale or
+    guessed item state is a bug, and nothing it did in the command survives."""
+
+    async def work(command: tx.CommandTx) -> int:
+        return await tx.record_event(command, subject(world, version=9), EventKind.FIELD_CHANGED)
+
+    async with engine.connect() as conn:
+        with pytest.raises(RuntimeError, match="not 9"):
+            await tx.run_command(conn, work, actor_id=world.lead)
+
+    assert await fetch(scratch_url, "SELECT * FROM outbox") == []
+    (count,) = await fetch(scratch_url, "SELECT count(*) AS n FROM item_events")
+    assert count["n"] == 1  # only the factory's event
+
+
+async def test_restamp_follows_the_clock_unless_the_caller_pinned_it(engine: AsyncEngine) -> None:
+    async def work(command: tx.CommandTx) -> tuple[datetime, datetime]:
+        before = command.now
+        await asyncio.sleep(0.05)
+        command.restamp()
+        return before, command.now
+
+    async with engine.connect() as conn:
+        before, after = await tx.run_command(conn, work)
+        assert after > before
+        pinned_before, pinned_after = await tx.run_command(conn, work, now=NOW)
+    assert pinned_before == pinned_after == NOW

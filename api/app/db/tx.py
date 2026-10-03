@@ -40,6 +40,14 @@ class CommandTx:
     actor_id: uuid.UUID | None = None
     request_id: str | None = None
     event_ids: list[int] = field(default_factory=list)  # filled by record_event
+    pinned: bool = False  # a caller (a test, the worker's clock) fixed `now`
+
+    def restamp(self) -> None:
+        """Take the time again. `now` is first read when the transaction starts, but a command can
+        then wait (key insert, row lock) for up to the lock timeout. Called right after the lock
+        is won, so `updated_at` and event times follow commit order instead of arrival order."""
+        if not self.pinned:
+            self.now = datetime.now(UTC)
 
 
 @asynccontextmanager
@@ -58,7 +66,9 @@ async def command_tx(
         async with conn.begin():
             await conn.execute(sa.text(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'"))
             await conn.execute(sa.text(f"SET LOCAL statement_timeout = '{STATEMENT_TIMEOUT}'"))
-            yield CommandTx(conn, now or datetime.now(UTC), actor_id, request_id)
+            yield CommandTx(
+                conn, now or datetime.now(UTC), actor_id, request_id, pinned=now is not None
+            )
     except DBAPIError as error:
         # Also reached for errors raised by COMMIT itself, after the body has returned.
         mapped = errors.translate(error)
@@ -161,9 +171,20 @@ async def record_event(
     stamp: dict[str, Any] = {"last_event_id": event_id, "updated_at": tx.now}
     if tx.actor_id is not None:
         stamp["last_activity_at"] = tx.now
-    await conn.execute(
-        sa.update(schema.work_items).where(schema.work_items.c.id == item.id).values(**stamp)
-    )
+    stamped = (
+        await conn.execute(
+            sa.update(schema.work_items)
+            .where(schema.work_items.c.id == item.id)
+            .values(**stamp)
+            .returning(schema.work_items.c.version, schema.work_items.c.team_id)
+        )
+    ).one()
+    if (stamped.version, stamped.team_id) != (item.version, item.team_id):
+        # The caller described a different item state than the row has: its event would carry a
+        # wrong version (I2). A bug, never a client error; the whole command rolls back.
+        raise RuntimeError(
+            f"record_event: item {item.id} is at version {stamped.version}, not {item.version}"
+        )
     await conn.execute(
         sa.insert(schema.outbox).values(
             topic=OUTBOX_TOPIC, payload={"event_ids": [event_id], "request_id": tx.request_id}

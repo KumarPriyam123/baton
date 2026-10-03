@@ -23,9 +23,14 @@ DESCRIPTION_MAX = 20_000
 
 
 def _no_nul(value: str) -> str:
-    # Postgres rejects NUL in text; a clear 400 beats a 500.
+    """Text Postgres can store. It rejects NUL, and a lone surrogate (valid in JSON, not in UTF-8)
+    cannot even be encoded; a clear 400 beats a 500."""
     if "\x00" in value:
         raise ValueError("must not contain the NUL character")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as error:
+        raise ValueError("must be valid Unicode text") from error
     return value
 
 
@@ -279,6 +284,11 @@ class PatchItemRequest(BaseModel):
         description="With `type`: also reset requires_approval and confidential to the "
         "new type's defaults.",
     )
+
+    @field_validator("reason")
+    @classmethod
+    def _check_reason(cls, value: str | None) -> str | None:
+        return None if value is None else _no_nul(value)
 
     @field_validator("title")
     @classmethod

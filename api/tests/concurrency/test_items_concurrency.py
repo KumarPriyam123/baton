@@ -1,12 +1,16 @@
 """CB2 and CB3 (SPEC 14): repeated and racing requests, with real concurrent connections."""
 
 import asyncio
+import time
+from datetime import UTC, datetime
 from typing import Any
 
+import asyncpg
 import httpx
 import pytest
 
 from app.config import Settings
+from app.db.urls import asyncpg_dsn
 from app.domain.errors import Busy
 from app.services import items as items_service
 from tests.integration.conftest import csrf_headers
@@ -291,3 +295,63 @@ async def test_a_chain_of_concurrent_edits_each_using_the_latest_version_never_l
         await scalar(seeded.url, "SELECT version FROM work_items WHERE key = $1", item["key"])
         == version
     )
+
+
+# ----- found in the phase 3 review ----------------------------------------------------------
+
+
+async def hold_row_lock(url: str, item_key: str) -> tuple[asyncpg.Connection, Any]:
+    """An open transaction holding FOR UPDATE on the item, as another command would."""
+    holder = await asyncpg.connect(asyncpg_dsn(url))
+    transaction = holder.transaction()
+    await transaction.start()
+    await holder.execute("SELECT 1 FROM work_items WHERE key = $1 FOR UPDATE", item_key)
+    return holder, transaction
+
+
+async def test_a_change_that_waited_for_the_row_lock_is_stamped_after_the_wait(
+    api: httpx.AsyncClient, seeded: SeededDatabase
+) -> None:
+    await signed_in(api, MEERA)
+    item = await created(api)
+    holder, transaction = await hold_row_lock(seeded.url, item["key"])
+    try:
+        edit = asyncio.create_task(
+            patch_item(api, item["key"], {"title": "Waited for the lock"}, version=1)
+        )
+        await asyncio.sleep(0.5)  # the edit started long ago and is stuck on the lock
+        released = datetime.now(UTC)
+        await transaction.rollback()
+    finally:
+        await holder.close()
+
+    response = await edit
+
+    assert response.status_code == 200
+    assert datetime.fromisoformat(response.json()["updated_at"]) >= released
+    events = await rows(
+        seeded.url,
+        "SELECT e.created_at FROM item_events e JOIN work_items w ON w.id = e.item_id "
+        "WHERE w.key = $1 AND e.kind = 'field_changed'",
+        item["key"],
+    )
+    assert events[0]["created_at"] >= released
+
+
+async def test_someone_who_cannot_see_an_item_gets_an_instant_404_even_while_it_is_locked(
+    api: httpx.AsyncClient, seeded: SeededDatabase, app_settings: Settings
+) -> None:
+    await signed_in(api, MEERA)
+    hidden = await created(api, team_key="CMP", type="compliance_request")
+    holder, transaction = await hold_row_lock(seeded.url, hidden["key"])
+    try:
+        async with signed_in_as(app_settings, ASHA) as outsider:  # Payments, not Compliance
+            started = time.perf_counter()
+            response = await patch_item(outsider, hidden["key"], {"priority": 1}, version=1)
+            elapsed = time.perf_counter() - started
+    finally:
+        await transaction.rollback()
+        await holder.close()
+
+    assert response.status_code == 404  # not a 503 after two seconds of waiting: no existence leak
+    assert elapsed < 1.5

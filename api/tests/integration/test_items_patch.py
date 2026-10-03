@@ -1,5 +1,6 @@
 """PATCH /items/{key} (SPEC 4.2, 6.2): who may edit what, versions, reasons, history."""
 
+import json
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -11,6 +12,7 @@ from tests.integration.test_items_create_read import DEV_VIEWER
 from tests.integration.test_teams_members import ASHA, MEERA, PRIYA, signed_in
 from tests.support.items import (
     ITEMS,
+    create_body,
     create_item,
     created,
     edited,
@@ -26,6 +28,10 @@ from tests.support.users import execute
 
 async def outbox_count(seeded: SeededDatabase) -> int:
     return int(await scalar(seeded.url, "SELECT count(*) FROM outbox"))
+
+
+async def version_of(seeded: SeededDatabase, key: str) -> int:
+    return int(await scalar(seeded.url, "SELECT version FROM work_items WHERE key = $1", key))
 
 
 # ----- preconditions ----------------------------------------------------------------------
@@ -613,3 +619,41 @@ async def test_create_without_key_is_refused_but_patch_without_key_still_works(
     assert refused.status_code == 400
     assert plain.status_code == 200
     assert (await create_item(api)).status_code == 201
+
+
+# ----- text the database cannot store (found in the phase 3 review) ---------------------------
+
+
+async def test_text_postgres_cannot_store_is_a_400_in_every_free_text_field(
+    api: httpx.AsyncClient, seeded: SeededDatabase
+) -> None:
+    await signed_in(api, MEERA)
+    item = await created(api, priority=1)
+    headers = {**csrf_headers(api), "content-type": "application/json"}
+
+    def raw(payload: dict[str, Any]) -> bytes:
+        # json.dumps writes a lone surrogate as an escape, which is how a client sends one
+        # (httpx itself refuses to encode it)
+        return json.dumps(payload).encode()
+
+    for text in ["a\x00b", "lone \ud800 surrogate"]:
+        for changes in (
+            {"priority": 3, "reason": text},
+            {"title": f"Fine title {text}"},
+            {"description": text},
+        ):
+            response = await api.patch(
+                f"{ITEMS}/{item['key']}",
+                content=raw(changes),
+                headers={**headers, "If-Match": '"1"', "Idempotency-Key": new_key()},
+            )
+
+            assert response.status_code == 400, changes
+            assert response.json()["code"] == "VALIDATION_FAILED"
+        made = await api.post(
+            ITEMS,
+            content=raw(create_body(title=f"Fine title {text}")),
+            headers={**headers, "Idempotency-Key": new_key()},
+        )
+        assert made.status_code == 400
+        assert await version_of(seeded, item["key"]) == 1

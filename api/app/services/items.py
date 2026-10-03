@@ -153,6 +153,7 @@ async def create_item(tx: CommandTx, ctx: ActorContext, command: CreateItem) -> 
     requires_approval = workflow.initial_requires_approval(command.type, command.requires_approval)
 
     key, number = await items_repo.allocate_number(tx.conn, team.id)
+    tx.restamp()  # the team row lock may have been a wait
     item = await items_repo.insert_item(
         tx.conn,
         {
@@ -236,7 +237,12 @@ async def edit_item(
     tx: CommandTx, ctx: ActorContext, key: str, expected_version: int, edit: EditItem
 ) -> EditResult:
     """PATCH (SPEC 4.2, 6.2): lock, who may, which version, what is valid, write, record."""
+    # Look before locking: someone who cannot see the item must not be able to tell it exists by
+    # waiting on another command's row lock (a 503 where a missing key is an instant 404).
+    if await items_repo.visible_item_id(tx.conn, ctx, key) is None:
+        raise NotFound(Decision.not_found().reason)
     item = await items_repo.lock_by_key(tx.conn, key)
+    tx.restamp()  # the lock may have been a wait; stamp the change at the time it happens
     facts = _locked_facts(item) if item else None
     if item is None or facts is None or not can_view(ctx, facts):
         raise NotFound(Decision.not_found().reason)
