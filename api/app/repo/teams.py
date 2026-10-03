@@ -101,7 +101,13 @@ async def delete_membership(conn: AsyncConnection, team_id: uuid.UUID, user_id: 
 async def count_open_items_owned(
     conn: AsyncConnection, team_id: uuid.UUID, user_id: uuid.UUID
 ) -> int:
-    """Open items this person is working in this team (served by work_items_assignee_open_idx)."""
+    """Open items this person is working in this team (served by work_items_assignee_open_idx).
+
+    Deliberately NOT filtered by visibility_clause() (CLAUDE.md I3): this is an integrity check,
+    and a hidden item must still block a removal. It is safe because only a lead of this team or
+    an admin may reach it (policy MANAGE_MEMBERS / MANAGE_LEADS), and both can see every item of
+    the team. tests/db/test_visibility_parity.py proves that claim.
+    """
     wi = schema.work_items.c
     finished = [ItemStatus.RESOLVED.value, ItemStatus.CLOSED.value]
     count = (

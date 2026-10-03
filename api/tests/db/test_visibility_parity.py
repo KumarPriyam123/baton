@@ -13,7 +13,15 @@ from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
 from app.db import schema
 from app.domain.enums import ItemStatus, TeamRole
-from app.domain.policy import Action, ActorContext, ItemFacts, can, can_view, visibility_clause
+from app.domain.policy import (
+    Action,
+    ActorContext,
+    ItemFacts,
+    TeamFacts,
+    can,
+    can_view,
+    visibility_clause,
+)
 from app.repo.users import load_actor_context
 from tests.support.seeded import SeededDatabase, seeded_database
 
@@ -183,6 +191,30 @@ async def test_the_requester_outside_the_team_sees_their_own_confidential_item(
             break
 
     assert found >= 3
+
+
+async def test_whoever_may_manage_a_team_can_see_every_item_in_it(conn: AsyncConnection) -> None:
+    """Why the membership guard may count a team's items without the visibility clause: the only
+    people allowed to manage members (leads of the team, admins) see all of that team's items,
+    confidential ones included."""
+    facts = await all_facts(conn)
+    users = await email_to_id(conn)
+    checked = 0
+    for user_id in users.values():
+        ctx = await load_actor_context(conn, user_id)
+        assert ctx is not None
+        visible = await visible_ids(conn, ctx)
+        for team_id in {f.team_id for f in facts.values()}:
+            allowed = can(ctx, Action.MANAGE_MEMBERS, TeamFacts(team_id)).allowed
+            if not allowed:
+                continue
+            checked += 1
+            in_team = {i for i, f in facts.items() if f.team_id == team_id}
+            assert in_team <= visible, (
+                f"{user_id} may manage {team_id} but cannot see all its items"
+            )
+
+    assert checked >= 12  # 12 leads x their team, plus the admin x 6 teams
 
 
 async def test_filtering_happens_before_limit_so_pages_stay_full(conn: AsyncConnection) -> None:
