@@ -28,7 +28,7 @@ End-to-end tests arrive in phase 13. A skipped test counts as a failure.
 | Prod refuses `DEMO_MODE` and `FAULT_*` | `tests/unit/test_config.py` | 0 |
 | Request id is validated, echoed and logged | `tests/integration/test_request_context.py` | 0 |
 
-| Every rule in SPEC 3.2 is enforced by the database, under its own name | `tests/db/test_constraints.py::test_database_rejects_it_and_names_the_guard` (24 cases) | 1 |
+| Every rule in SPEC 3.2 is enforced by the database, under its own name | `tests/db/test_constraints.py::test_database_rejects_it_and_names_the_guard` (28 cases) | 1 |
 | ...and that test can pass only because of that guard | `test_constraints.py::test_it_only_fails_because_of_that_guard`: drops the guard inside the test transaction and the same statement must succeed | 1 |
 | Every SPEC 3.2 index, primary key and table exists as specified, and no unlisted index exists | `tests/db/test_indexes.py` | 1 |
 | Migration is reversible and repeatable | `tests/db/test_migrations.py` (catalog snapshot equal after up, down, up) | 1 |

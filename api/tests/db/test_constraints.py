@@ -150,6 +150,51 @@ async def test_outbox_rows_without_a_dedupe_key_never_collide(
     await insert(conn, "outbox", topic="item.event")
 
 
+# Identities never change, but everything around them still can
+
+
+async def test_a_transfer_changes_team_but_not_the_key(
+    conn: asyncpg.Connection, world: World
+) -> None:
+    await conn.execute(
+        "UPDATE work_items SET team_id = $2, version = version + 1 WHERE id = $1",
+        world.item_id,
+        world.other_team.id,
+    )
+
+    row = await conn.fetchrow(
+        "SELECT key, team_id, origin_team_id FROM work_items WHERE id = $1", world.item_id
+    )
+    assert row is not None
+    assert row["key"] == world.item_key
+    assert row["team_id"] == world.other_team.id
+    assert row["origin_team_id"] == world.team.id
+
+
+async def test_the_team_counter_and_name_can_still_change(
+    conn: asyncpg.Connection, world: World
+) -> None:
+    await conn.execute(
+        "UPDATE teams SET item_seq = item_seq + 1, name = 'Payments' WHERE id = $1", world.team.id
+    )
+
+    name = await conn.fetchval("SELECT name FROM teams WHERE id = $1", world.team.id)
+    assert name == "Payments"
+
+
+async def test_writing_the_same_key_back_is_not_a_change(
+    conn: asyncpg.Connection, world: World
+) -> None:
+    result = await conn.execute(
+        "UPDATE work_items SET key = $2, number = $3 WHERE id = $1",
+        world.item_id,
+        world.item_key,
+        world.item_number,
+    )
+
+    assert result == "UPDATE 1"
+
+
 # Append-only history
 
 

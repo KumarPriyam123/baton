@@ -161,6 +161,24 @@ async def _same_membership_twice(conn: asyncpg.Connection, w: World) -> object:
     return await insert(conn, "memberships", team_id=w.team.id, user_id=w.member, role="viewer")
 
 
+async def _rename_team_key(conn: asyncpg.Connection, w: World) -> object:
+    return await conn.execute("UPDATE teams SET key = 'ZZZ' WHERE id = $1", w.team.id)
+
+
+async def _rekey_item(conn: asyncpg.Connection, w: World) -> object:
+    return await conn.execute("UPDATE work_items SET key = 'PAY-999' WHERE id = $1", w.item_id)
+
+
+async def _renumber_item(conn: asyncpg.Connection, w: World) -> object:
+    return await conn.execute("UPDATE work_items SET number = 999 WHERE id = $1", w.item_id)
+
+
+async def _change_origin_team(conn: asyncpg.Connection, w: World) -> object:
+    return await conn.execute(
+        "UPDATE work_items SET origin_team_id = $2 WHERE id = $1", w.item_id, w.other_team.id
+    )
+
+
 async def _update_event(conn: asyncpg.Connection, w: World) -> object:
     return await conn.execute(
         "UPDATE item_events SET reason = 'rewritten' WHERE id = $1", w.event_id
@@ -332,6 +350,39 @@ VIOLATIONS: list[Violation] = [
         _drop_constraint("memberships", "memberships_pkey"),
         _same_membership_twice,
         UNIQUE,
+    ),
+    # identities never change (trigger raises restrict_violation)
+    Violation(
+        "rename_a_team_key",
+        "teams_key_immutable",
+        "DROP TRIGGER teams_key_immutable ON teams",
+        _rename_team_key,
+        asyncpg.RestrictViolationError,
+        in_message="immutable",
+    ),
+    Violation(
+        "change_an_item_key",
+        "work_items_identity_immutable",
+        "DROP TRIGGER work_items_identity_immutable ON work_items",
+        _rekey_item,
+        asyncpg.RestrictViolationError,
+        in_message="immutable",
+    ),
+    Violation(
+        "change_an_item_number",
+        "work_items_identity_immutable",
+        "DROP TRIGGER work_items_identity_immutable ON work_items",
+        _renumber_item,
+        asyncpg.RestrictViolationError,
+        in_message="immutable",
+    ),
+    Violation(
+        "change_an_items_origin_team",
+        "work_items_identity_immutable",
+        "DROP TRIGGER work_items_identity_immutable ON work_items",
+        _change_origin_team,
+        asyncpg.RestrictViolationError,
+        in_message="immutable",
     ),
     # append-only history (trigger raises restrict_violation)
     Violation(

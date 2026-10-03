@@ -136,6 +136,13 @@ Database-enforced rules (CHECK constraints — the last line of defence if appli
 | `duplicate_has_target` | `resolution IS DISTINCT FROM 'duplicate' OR duplicate_of_id IS NOT NULL` |
 | `not_self_duplicate` | `duplicate_of_id IS DISTINCT FROM id` |
 
+Identity rules (a CHECK cannot see the old row, so these are `BEFORE UPDATE` triggers):
+
+| Trigger | Rule |
+|---|---|
+| `teams_key_immutable` | `teams.key` never changes |
+| `work_items_identity_immutable` | `work_items.key`, `number` and `origin_team_id` never change, not even on transfer |
+
 Indexes (each one exists for a named query):
 
 | Index | Serves |

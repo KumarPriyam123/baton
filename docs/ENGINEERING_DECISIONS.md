@@ -80,3 +80,11 @@ migration renames and widens the column in place and converts existing values ("
 becomes the newest event with `item_version <= V`; the downgrade maps back). Tested with data in
 `tests/db/test_migrations.py`. No foreign key to `item_events` was added: the SPEC lists a plain
 bigint, and the seed verifier checks that each marker belongs to its own item.
+
+## 13. Keys and numbers are immutable in the database (migration 0003)
+
+SPEC 3.2 says `teams.key` is immutable and `work_items.key` never changes, but only the
+application would have enforced it, which CLAUDE.md I10 does not allow for a critical rule.
+`BEFORE UPDATE` triggers reject changes to `teams.key` and to `work_items.key`, `number` and
+`origin_team_id` (the three that make a key unique). Rewriting the same value is allowed, and
+every other column (item_seq, version, team_id on a transfer...) is untouched.
