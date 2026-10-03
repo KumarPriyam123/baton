@@ -4,6 +4,15 @@ Where the project stands, how to run it, and what to know before the next sessio
 
 ## Current state
 
+**Phase 11 (lean, management visibility) is done on top of phase 14.** `GET /stats/teams` and `GET /decisions`
+(`repo/stats.py`, `repo/decisions.py`, `api/routers/overview.py`, `api/schemas/overview.py`; decision 51), the
+`/dashboard` and `/decisions` screens, and the notification bell in the rail (`features/dashboard`,
+`features/decisions`, `features/notifications`, `lib/notifications.ts`). Tests: `test_stats.py`,
+`test_decisions.py` (6 API tests: a member vs a lead on a confidential item, figures equal the same person's
+queue lists, paging and filters, 401) and `lib/notifications.test.ts`. Screenshots: `node scripts/management-screens.mjs`
+(`THEME=dark`, `BASE_URL`, `PW_CHANNEL=chrome`). Limits: KNOWN_LIMITATIONS "Phase 11 was lean". Tag: `phase-11-done`.
+Not built: team settings, jobs page, command palette, median age and the 14-day series.
+
 **Phase 14 (lean, submission readiness) is done on top of frontend session B.** README, Top 5 decisions, ARCHITECTURE, TESTING (CB1-CB8 map and the not-tested list), KNOWN_LIMITATIONS (ordered), DEMO_SCRIPT (5 minutes), SPEC marked where it describes unbuilt things (decision 50). CI web lint fixed (`web/eslint.config.js`). Verified from a fresh clone of GitHub: build, migrate, seed, sign in, create and claim an item through nginx, readyz at migration 0004, API test command (3,360 passed, 0 skipped, 360 s; REQUIREMENTS_TRACE D2). Port 8080 is held by an unrelated container on this machine, so the check ran with `WEB_PORT=8082`. **Not done:** a rehearsed demo, PERFORMANCE.md, prepared answers to the six Final Discussion questions, the Mermaid diagrams were not rendered. The repo is private; making it public is the owner's decision. Tag: `submission-candidate-1`.
 
 **Frontend session B (phase 10, lean) is done on top of session A. Phase 7 (SSE) has not started.** Tags: `phase-4-done`, `phase-6-done`, `fe-a-done`, `fe-b-done`.

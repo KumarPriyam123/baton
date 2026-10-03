@@ -9,7 +9,7 @@ ordered by how much it matters to someone using or judging the system; the secon
 | # | Limitation | Effect | What it would take |
 |---|---|---|---|
 | 1 | **Live updates are 10 s polling, not SSE** (decision 49, 50). `GET /stream` does not exist; `NOTIFY` is sent but nobody listens | A change by someone else shows after about 10 s, not 2 s; load grows with open tabs, not with changes; no 250 ms coalescing, no "N items changed" bar | The listener and `GET /stream` from SPEC 10 (about a day); `useLiveUpdates.ts` keeps its interface and the polling stays as the fallback. Detail: "Frontend session B" |
-| 2 | **Several screens and two endpoints are not built**: dashboard, decision log, teams, jobs and notifications screens; `GET /stats/teams` and `GET /decisions` | Managers have no overview; dead jobs can only be seen through `GET /admin/jobs`; notifications exist in the API and database but not on screen | Two read endpoints through `visibility_clause()` (SPEC 7) and five screens against the generated client |
+| 2 | **Two screens are not built**: team settings and the jobs page (the dashboard, decision log and notification bell exist since phase 11, lean: see "Phase 11 was lean") | Members are managed only through `/teams/{key}/members`; dead jobs only through `GET /admin/jobs` | Two screens against the generated client |
 | 3 | **Most properties are not editable in the UI**: title, type, due date, confidential, requires-approval (priority, watch and description are) | The API supports every edit (`PATCH`); users cannot do them from the item pane | Inline editors reusing `useSaveFields` and the rebase logic |
 | 4 | **Performance was not measured.** The large seed (50,000 items) loads and verifies, but there is no `bench.py`, no `PERFORMANCE.md`, no p95 | The SPEC 13 targets are unproven; an admin's unfiltered list sorts the whole table (about 20 ms at 50,000 items, measured once) | Run `bench.py` per BUILD_PLAN phase 12; add the `COALESCE(due_at, 'infinity')` expression indexes if `EXPLAIN` asks |
 | 5 | **No cleanup job and no fault injection**: idempotency keys, expired sessions and `done` outbox rows are never deleted; `FAULT_NOTIFY_FAIL_RATE` is read but unused | Tables grow; an old idempotency key still replays | The hourly job from SPEC 9 under an advisory lock (a few handlers, a few tests) |
@@ -261,6 +261,34 @@ and a track with the "+N" collapsed middle were not looked at (the collapse has 
 output was not heard; the `aria-live` regions are written to (polite for live changes, assertive for the
 conflict dialog) and the track has an `ol` with the same facts, but nothing was run in a reader.
 Two React Compiler lint warnings from session A remain.
+
+## Phase 11 was lean: what the management screens do not do
+
+`GET /stats/teams`, `GET /decisions`, the dashboard, the decision log and the notification bell are built
+(decision 51). Left out by the 90-minute box, so nobody reads them as more than they are:
+
+- **Dashboard figures are a subset of SPEC 7.** Built: open by status and priority, overdue, unowned, going
+  quiet, the five oldest open items, the busiest eight owners. **Not built:** median age, the 14-day
+  created-versus-resolved sparkline, "awaiting approval" as its own column beyond the status count.
+- **"Going quiet" is a number, not a link.** The queue has no filter for "no activity for 72 h"; linking to
+  the nearest preset would open a list that does not match the number. Every other figure links to a queue
+  filter that returns exactly that count (`overdue=true`, `assignee=none` with the four open statuses, one
+  status, one priority), and a test compares them.
+- **The dashboard reads all open items of the teams a person can see on every request** (one aggregate and
+  two small queries, 4 statements). No index was added and it was not run on `baton_large`; at 50,000 items
+  with most of them open it would scan them. A partial index on open items, or the materialised counters of
+  SPEC 15, are the fixes.
+- **Decisions about a confidential item are judged against the item now**, like notifications: someone who
+  lost access sees none of them, someone who gained it sees all of them.
+- **The bell polls** (the unread count every 20 s, the list while open); it does not use the stream.
+  The count is capped at "20+" (it fetches 21). Opening an item from the popover marks that item's
+  notifications read; opening it any other way (the queue, a link) does not.
+- **Decision wording uses names the page knows.** A transfer shows team names from `GET /teams`; a person
+  who is only an id in the event data would read "someone".
+- **Tests (time box):** one API test per endpoint for visibility, plus paging and filters, and a Vitest test
+  of the badge cap. No Playwright, no T-VIS property test over the new endpoints, no query-count guard
+  for the dashboard, no axe run, no 375 px layout, no sabotage run and no independent review.
+- **The popover's focus and keyboard behaviour is Radix's**; it was not driven by keyboard here.
 
 ## CI status
 

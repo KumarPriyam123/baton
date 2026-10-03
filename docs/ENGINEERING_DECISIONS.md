@@ -592,3 +592,33 @@ also in KNOWN_LIMITATIONS.
   the listed error codes (`test_errors.py`).
 - **Not a SPEC fix:** CLAUDE.md still lists SSE in the stack table and `--profile e2e` in Commands; both
   describe the plan, not the submission. README and TESTING say what runs today.
+
+## 51. Phase 11 (lean): the dashboard and decision log, as a smaller dashboard than SPEC 7
+
+`GET /stats/teams`, `GET /decisions` and the screens are built after all. Decision 50 had marked them "not
+built"; the SPEC text now says what exists.
+
+- **The dashboard's content changed on purpose.** SPEC 7 listed median age and a 14-day created/resolved
+  series. The brief for this phase asked for open by status and priority, overdue, no owner, going quiet, the
+  oldest items and load per owner, which answer "what needs attention, who owns it, what is forgotten" more
+  directly. Built those; left median age and the sparkline out (KNOWN_LIMITATIONS). SPEC 7 was edited to
+  match, not left disagreeing with the code.
+- **One definition of each number, shared with the queue.** Open = not resolved or closed; overdue = due date
+  passed and not finished (the same expression as `overdue=true`); unowned = open with no assignee (the
+  queue's `assignee=none`); going quiet = in progress or blocked and 72 h without activity (the same constant
+  as the inbox). So a figure and the list behind it cannot drift apart, and a test compares them.
+- **Visibility inside every query.** `visibility_clause()` is in the WHERE of the aggregate, the lateral
+  "oldest five" and the owner-load query, and in the decision log's join to `work_items`, so a member's count
+  omits a confidential item a lead's includes. Team rows are the teams a person belongs to (all, for an admin)
+  plus any team where they can see an item (a requester's own requests).
+- **Four statements, whatever the data:** the grouped counts, the team names, a `LATERAL` top-5 per team and a
+  ranked per-owner count. Not a query per team.
+- **Decisions are `is_decision = true` events**, keyset-paged by event id, with the `team` filter on the team
+  the item had after the decision and an optional `kind` list. A decision with no reason (an approval with no
+  note) is shown as "No reason was given", not hidden.
+- **Notification badge asks for one more than its cap** (21 for "20+"), so the cap needs no count query.
+- **A bug found on the way:** `cn()` is `tailwind-merge`, which does not know the custom `text-figure`,
+  `text-body`, `text-meta` sizes and treats them as colours, so `cn("text-figure", "text-ink")` silently drops
+  the size. The headline figures were 14 px until they used `clsx`. Existing `cn(...)` calls that pair a custom
+  size with a colour lose the size (they inherit 14 px); fixing it globally changes existing screens, so it is
+  left as a note.

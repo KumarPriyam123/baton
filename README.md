@@ -48,6 +48,19 @@ docker compose -f compose.yaml -f compose.test.yaml run --rm web-test   # ~10 s,
 Both use a separate `db-test` container. Add `--build` after dependency or Dockerfile changes. Playwright
 end-to-end tests run from the host against a running stack; see [docs/TESTING.md](docs/TESTING.md).
 
+## Screens
+
+| Screen | Path | What it answers |
+|---|---|---|
+| Sign in | `/login` | demo accounts in demo mode |
+| Inbox | `/inbox` | what needs me: approvals, urgent, unowned, going quiet, my requests |
+| Queue and item | `/items`, `/items/PAY-142` | filter, search, act on one request, its handoff track and timeline |
+| Dashboard | `/dashboard` | per team: open by status and priority, overdue, unowned, going quiet, oldest items, load per owner; every figure links to the matching queue |
+| Decisions | `/decisions` | why things were approved, closed, moved or downgraded, with the reason; filter by team and kind |
+| Notifications | the bell in the rail | unread count (capped at "20+"), latest updates grouped by item, mark read |
+
+Not built: team settings, the jobs page, the command palette (see `docs/KNOWN_LIMITATIONS.md`).
+
 ## Repo map
 
 ```
@@ -62,7 +75,7 @@ api/                    FastAPI service, worker, migrations, seed (Python 3.12)
   scripts/                seed.py, verify_seed.py, bench.py
   tests/                  unit/ db/ integration/ concurrency/ perf/
 web/                    React + TypeScript + Vite SPA (served by nginx in Compose)
-  src/features/           inbox, queue, item, create, auth
+  src/features/           inbox, queue, item, create, dashboard, decisions, notifications, auth
   e2e/                    Playwright
 docs/                   see below
 ```

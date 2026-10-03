@@ -73,7 +73,7 @@ Real stack through nginx on port 8081 (migration head 0004): claim, a losing cla
 | S5 | Two people start on the same issue without realising | atomic claim; duplicate suggestions while typing and after creation | 4, 5, 6, 9 | T-CLAIM; similar-items test; E2E claim race | ☐ |
 | S6 | Someone changes a request while another views or edits an older version | versions + If-Match + `changes_since`; live updates; conflict dialog | 3, 7, 10 | T-STALE; E2E stale edit | ◐ phase 3: versions, If-Match, `changes_since` proven (T-STALE); live updates and the dialog in 7 and 10 |
 | S7 | Important requests disappear in message threads | one queue per team; "Needs an owner"; "going quiet" detection | 5 | attention tests | ☐ |
-| S8 | Management can't see what's happening, who owns it, what needs attention, what changed, what's forgotten, or why a decision was made | dashboard; attention; activity timeline; "updated since you looked"; stale/overdue; decision log with required reasons | 5, 11 | stats/decisions tests; dashboard screenshot | ☐ |
+| S8 | Management can't see what's happening, who owns it, what needs attention, what changed, what's forgotten, or why a decision was made | dashboard; attention; activity timeline; "updated since you looked"; stale/overdue; decision log with required reasons | 5, 11 | phase 11 (lean): `test_stats.py` and `test_decisions.py` (a member does not see the confidential item's count or decision, a lead does, and each dashboard figure equals the same person's queue list); `web/test-results/screens/dashboard-light.png`, `decisions-light.png`. ◐ no median age or 14-day sparkline, "going quiet" is not a link, no T-VIS property test over the new endpoints | ◐ |
 
 ## What the system should enable
 
@@ -118,7 +118,7 @@ Real stack through nginx on port 8081 (migration head 0004): claim, a losing cla
 
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
 |---|---|---|---|---|---|
-| U1 | Useful overview of ongoing work | Inbox + Dashboard | 9, 11 | screenshots | ☐ |
+| U1 | Useful overview of ongoing work | Inbox + Dashboard | 9, 11 | phase 11 (lean): screenshots of the dashboard in light and dark and of the decision log and notification popover at 1280 px, looked at against DESIGN 4.6, 4.7, 4.11; not run: 375 px, axe | ◐ |
 | U2 | Quickly see what requires attention | attention sections; next-step chips | 5, 9 | attention tests | ◐ fe-a: Inbox sections and next-step chips built and checked in the browser (screenshot reviewed against DESIGN); no Playwright test for it |
 | U3 | Find relevant work without browsing everything | filters in URL, facets, full-text + fuzzy search, key jump, command palette | 5, 9 | search tests; E2E | ◐ fe-a: URL filters (zod, round-trip tested), facet counts, sort, search as you type with marked words and typo tolerance, key jump: driven in the browser; command palette skipped |
 | U4 | Usable as stored work grows | keyset pagination, virtualised list, indexes, ranked search capped | 3, 9, 12 | PERFORMANCE.md on large seed | ◐ phase 3: keyset pagination over 1,000 items, EXPLAIN on the large seed (decision 32); fe-a: virtualised infinite list built, **not yet run on the large seed**; numbers in 12 |
