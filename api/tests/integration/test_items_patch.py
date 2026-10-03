@@ -438,7 +438,7 @@ async def test_requires_approval_cannot_change_while_awaiting_approval(
     assert "Cancel the approval" in response.json()["detail"]
 
 
-async def test_editing_the_text_of_an_item_with_an_approval_is_refused_until_phase_4(
+async def test_editing_the_text_of_an_item_with_an_approval_invalidates_it_in_the_same_command(
     api: httpx.AsyncClient, seeded: SeededDatabase, app_settings: Settings
 ) -> None:
     await signed_in(api, MEERA)
@@ -453,15 +453,42 @@ async def test_editing_the_text_of_an_item_with_an_approval_is_refused_until_pha
         PRIYA,
     )
     async with signed_in_as(app_settings, PRIYA) as lead:
+        before = (await lead.get(f"{ITEMS}/{item['key']}")).json()
         text = await patch_item(lead, item["key"], {"title": "Changed after approval"}, version=1)
+        view = (await lead.get(f"{ITEMS}/{item['key']}")).json()
+
+    assert "edit_text" in before["allowed_actions"]  # edits are offered again (decision 27 is gone)
+    assert "edit_type" in before["allowed_actions"]
+    assert text.status_code == 200
+    assert text.json()["version"] == 2  # one command, one bump, however many events it wrote
+    assert view["approval"]["status"] == "invalidated"
+    events = [e for e in await events_of(seeded.url, item["key"]) if e["item_version"] == 2]
+    assert [e["kind"] for e in events] == ["field_changed", "approval_invalidated"]
+    assert events[1]["is_decision"]
+    assert json.loads(events[1]["data"])["fields"] == ["title"]
+    assert events[1]["reason"] == "Content changed: title"
+
+
+async def test_a_non_material_edit_leaves_an_approval_alone(
+    api: httpx.AsyncClient, seeded: SeededDatabase, app_settings: Settings
+) -> None:
+    await signed_in(api, MEERA)
+    item = await created(api, type="payment_investigation")
+    await execute(
+        seeded.url,
+        "INSERT INTO approvals "
+        "(item_id, status, requested_by, subject_hash, decided_by, decided_at) "
+        "SELECT w.id, 'approved', w.requester_id, 'hash', u.id, now() FROM work_items w, users u "
+        "WHERE w.key = $1 AND u.email = $2",
+        item["key"],
+        PRIYA,
+    )
+    async with signed_in_as(app_settings, PRIYA) as lead:
         priority = await patch_item(lead, item["key"], {"priority": 0}, version=1)
         view = (await lead.get(f"{ITEMS}/{item['key']}")).json()
 
-    assert text.status_code == 409
-    assert "approval on record" in text.json()["detail"]
-    assert priority.status_code == 200  # not a material field
-    assert "edit_text" not in view["allowed_actions"]  # the UI is told not to offer it
-    assert "edit_type" not in view["allowed_actions"]
+    assert priority.status_code == 200
+    assert view["approval"]["status"] == "approved"
 
 
 # ----- stale writes (T-STALE, one request at a time) ---------------------------------------

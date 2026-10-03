@@ -233,12 +233,16 @@ async def test_allowed_actions_follow_the_role_of_the_one_asking(
     async with signed_in_as(app_settings, DEV_VIEWER) as viewer:
         viewers = (await viewer.get(f"{ITEMS}/{item['key']}")).json()["allowed_actions"]
 
-    # the requester, while the item is new and unassigned
-    assert sorted(mine) == sorted(["comment", "watch", "edit_text", "change_priority"])
+    # the requester, while the item is new and unassigned: she may also withdraw it
+    assert sorted(mine) == sorted(["comment", "watch", "withdraw", "edit_text", "change_priority"])
     assert sorted(leads) == sorted(
         [
             "comment",
             "watch",
+            "claim",
+            "assign",
+            "close",
+            "transfer",
             "edit_text",
             "change_priority",
             "edit_type",

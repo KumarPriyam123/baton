@@ -86,7 +86,6 @@ class ItemRecord:
     last_event_at: datetime | None
     unread_since_event_id: int | None
     blocked_reason: str | None
-    has_live_approval: bool  # a pending or an approved approval exists (not only the newest)
 
     @staticmethod
     def from_row(row: sa.Row[Any]) -> "ItemRecord":
@@ -99,14 +98,6 @@ class ItemRecord:
         if values["approval_status"] is not None:
             values["approval_status"] = ApprovalStatus(values["approval_status"])
         return ItemRecord(**values)
-
-
-def _live_approval(item_id: ColumnElement[Any]) -> ColumnElement[bool]:
-    ap = schema.approvals.c
-    return sa.exists().where(
-        ap.item_id == item_id,
-        ap.status.in_([ApprovalStatus.PENDING.value, ApprovalStatus.APPROVED.value]),
-    )
 
 
 # Every column of work_items except the generated tsvector, which no item view needs.
@@ -224,7 +215,6 @@ def _item_query(viewer_id: uuid.UUID, page: Subquery) -> Select[Any]:
         sa.case((b.status == ItemStatus.BLOCKED.value, blocked_reason), else_=None).label(
             "blocked_reason"
         ),
-        _live_approval(b.id).label("has_live_approval"),
     ).select_from(source)
 
 
@@ -269,7 +259,6 @@ class LockedItem:
     requester_id: uuid.UUID
     assignee_id: uuid.UUID | None
     pending_approval_requested_by: uuid.UUID | None
-    has_live_approval: bool  # a pending or an approved approval exists
 
 
 async def lock_by_key(conn: AsyncConnection, key: str) -> LockedItem | None:
@@ -302,7 +291,6 @@ async def lock_by_key(conn: AsyncConnection, key: str) -> LockedItem | None:
                 wi.requester_id,
                 wi.assignee_id,
                 pending_by.label("pending_approval_requested_by"),
-                _live_approval(wi.id).label("has_live_approval"),
             )
             .select_from(schema.work_items.join(schema.teams, t.id == wi.team_id))
             .where(wi.key == key)

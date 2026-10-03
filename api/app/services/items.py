@@ -16,22 +16,10 @@ from app.domain import workflow
 from app.domain.enums import ApprovalStatus, EventKind, ItemStatus, ItemType, TeamRole
 from app.domain.errors import Forbidden, NotFound, ValidationFailed
 from app.domain.policy import Action, ActorContext, Decision, ItemFacts, can, can_view
+from app.repo import approvals as approvals_repo
 from app.repo import events as events_repo
 from app.repo import items as items_repo
 from app.repo import teams as teams_repo
-
-# What `allowed_actions` can say before phase 4 adds the workflow commands.
-FIELD_ACTIONS = (
-    Action.COMMENT,
-    Action.WATCH,
-    Action.EDIT_TEXT,
-    Action.CHANGE_PRIORITY,
-    Action.EDIT_TYPE,
-    Action.EDIT_DUE_AT,
-    Action.EDIT_CONFIDENTIAL,
-    Action.REQUIRES_APPROVAL_ON,
-    Action.REQUIRES_APPROVAL_OFF,
-)
 
 
 @dataclass(frozen=True)
@@ -60,28 +48,21 @@ def _facts(record: items_repo.ItemRecord) -> ItemFacts:
     )
 
 
-def _available(action: Action, record: items_repo.ItemRecord) -> bool:
-    """State rules on top of policy: an action the item's state makes pointless is not offered
-    (the UI renders buttons from this list and never decides for itself, I4)."""
-    awaiting = record.status == ItemStatus.AWAITING_APPROVAL
-    match action:
-        case Action.REQUIRES_APPROVAL_ON:
-            return not record.requires_approval and not awaiting
-        case Action.REQUIRES_APPROVAL_OFF:
-            return record.requires_approval and not awaiting
-        case Action.EDIT_TEXT | Action.EDIT_TYPE:
-            return not record.has_live_approval  # lifted in phase 4, which invalidates instead
-        case _:
-            return True
+def _workflow_facts(record: items_repo.ItemRecord) -> workflow.WorkflowFacts:
+    # `has_valid_approval` is what `evaluate` needs to gate a resolve; `allowed_actions` never
+    # reads it (it offers Resolve and lets the server answer APPROVAL_REQUIRED, SPEC 12).
+    return workflow.WorkflowFacts(
+        status=record.status,
+        assignee_id=record.assignee_id,
+        requires_approval=record.requires_approval,
+        has_pending_approval=record.approval_status == ApprovalStatus.PENDING,
+        has_valid_approval=False,
+    )
 
 
 def build_view(record: items_repo.ItemRecord, ctx: ActorContext, now: datetime) -> ItemView:
     facts = _facts(record)
-    allowed = [
-        action
-        for action in FIELD_ACTIONS
-        if can(ctx, action, facts).allowed and _available(action, record)
-    ]
+    allowed = workflow.allowed_actions(ctx, facts, _workflow_facts(record))
     role = ctx.roles.get(record.team_id)
     step = workflow.next_step(
         status=record.status,
@@ -257,8 +238,10 @@ async def edit_item(
         since = await events_repo.changes_since(tx.conn, item.id, expected_version)
         raise StaleVersion(current, since)
 
+    approvals = await approvals_repo.live_for_item(tx.conn, item.id)  # item first, then approvals
     plan = workflow.plan_edit(
         workflow.ItemState(
+            team_id=item.team_id,
             type=item.type,
             title=item.title,
             description=item.description,
@@ -273,7 +256,7 @@ async def edit_item(
         edit.fields,
         apply_type_defaults=edit.apply_type_defaults,
         reason=edit.reason,
-        has_live_approval=item.has_live_approval,
+        approvals=approvals,
     )
     if not plan.changed:  # nothing to write: no version, no event
         return EditResult(await get_item(tx.conn, ctx, key, tx.now), changed=False)
@@ -286,6 +269,12 @@ async def edit_item(
             await get_item(tx.conn, ctx, key, tx.now),
             await events_repo.changes_since(tx.conn, item.id, expected_version),
         )
+    await approvals_repo.close_without_decision(
+        tx.conn,
+        plan.invalidated,
+        status=ApprovalStatus.INVALIDATED,
+        reason=plan.invalidated_reason,
+    )
     for event in plan.events:
         await record_event(
             tx,

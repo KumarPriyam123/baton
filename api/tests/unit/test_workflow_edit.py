@@ -1,24 +1,29 @@
 """SPEC 3.1, 4.2, 4.5: the pure rules for creating, editing and describing an item."""
 
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 
 from app.domain import workflow
-from app.domain.enums import DueSource, EventKind, ItemStatus, ItemType
+from app.domain.enums import ApprovalStatus, DueSource, EventKind, ItemStatus, ItemType
 from app.domain.errors import ReasonRequired, ValidationFailed, WorkflowViolation
+from app.domain.hashing import subject_hash
 from app.domain.policy import Action
 
 CREATED = datetime(2025, 3, 1, 9, 0, tzinfo=UTC)
 NOW = CREATED + timedelta(hours=10)
+TEAM = uuid.UUID(int=1)
+TITLE, DESCRIPTION = "Refund stuck", "Customer charged twice."
 
 
 def state(**overrides: Any) -> workflow.ItemState:
     values: dict[str, Any] = {
+        "team_id": TEAM,
         "type": ItemType.INCIDENT,
-        "title": "Refund stuck",
-        "description": "Customer charged twice.",
+        "title": TITLE,
+        "description": DESCRIPTION,
         "priority": 2,
         "status": ItemStatus.IN_PROGRESS,
         "due_at": CREATED + timedelta(hours=72),
@@ -35,7 +40,7 @@ def plan(requested: dict[str, Any], **overrides: Any) -> workflow.EditPlan:
     options: dict[str, Any] = {
         "apply_type_defaults": False,
         "reason": None,
-        "has_live_approval": False,
+        "approvals": [],
     }
     item_overrides = {k: overrides.pop(k) for k in list(overrides) if k.startswith("item_")}
     options.update(overrides)
@@ -226,16 +231,74 @@ def test_other_fields_can_change_while_awaiting_approval() -> None:
     assert plan({"priority": 1}, item_status=ItemStatus.AWAITING_APPROVAL).changed
 
 
+def approval(status: ApprovalStatus, content: tuple[str, str, str] | None = None) -> Any:
+    item_type, title, description = content or ("incident", TITLE, DESCRIPTION)
+    return workflow.ApprovalFact(
+        id=uuid.uuid4(),
+        status=status,
+        subject_hash=subject_hash(TEAM, item_type, title, description),
+        requested_by=uuid.UUID(int=2),
+    )
+
+
 @pytest.mark.parametrize("field", ["title", "description", "type"])
-def test_material_edits_are_refused_while_an_approval_is_on_record(field: str) -> None:
+def test_a_material_edit_invalidates_an_approved_approval(field: str) -> None:
     new = ItemType.ENGINEERING if field == "type" else "something else"
+    approved = approval(ApprovalStatus.APPROVED)
 
-    with pytest.raises(WorkflowViolation, match="approval on record"):
-        plan({field: new}, has_live_approval=True)
+    result = plan({field: new}, approvals=[approved], item_status=ItemStatus.IN_PROGRESS)
+
+    assert result.invalidated == (approved.id,)
+    assert result.invalidated_reason == f"Content changed: {field}"
+    event = result.events[-1]
+    assert event.kind == EventKind.APPROVAL_INVALIDATED
+    assert event.is_decision
+    assert event.data["approval_ids"] == [str(approved.id)]
+    assert event.data["fields"] == [field]
+    assert "status" not in result.updates  # nothing was waiting: the item stays where it is
 
 
-def test_non_material_edits_are_fine_with_an_approval_on_record() -> None:
-    assert plan({"priority": 3}, has_live_approval=True).changed
+def test_a_material_edit_cancels_the_wait_and_returns_the_item_to_in_progress() -> None:
+    pending = approval(ApprovalStatus.PENDING)
+
+    result = plan(
+        {"title": "A better title"},
+        approvals=[pending],
+        item_status=ItemStatus.AWAITING_APPROVAL,
+    )
+
+    assert result.invalidated == (pending.id,)
+    assert result.updates["status"] == ItemStatus.IN_PROGRESS
+    assert result.events[-1].data["status"] == {
+        "from": "awaiting_approval",
+        "to": "in_progress",
+    }
+
+
+def test_every_stale_approved_approval_is_invalidated_not_only_the_latest() -> None:
+    older, newer = approval(ApprovalStatus.APPROVED), approval(ApprovalStatus.APPROVED)
+
+    result = plan({"title": "Changed"}, approvals=[older, newer])
+
+    assert set(result.invalidated) == {older.id, newer.id}
+
+
+def test_an_approval_that_still_covers_the_new_content_is_kept() -> None:
+    covers_new = approval(ApprovalStatus.APPROVED, ("incident", "Changed", DESCRIPTION))
+
+    result = plan({"title": "Changed"}, approvals=[covers_new])
+
+    assert result.invalidated == ()
+    assert all(e.kind != EventKind.APPROVAL_INVALIDATED for e in result.events)
+
+
+@pytest.mark.parametrize("status", [ApprovalStatus.PENDING, ApprovalStatus.APPROVED])
+def test_non_material_edits_leave_approvals_alone(status: ApprovalStatus) -> None:
+    result = plan({"priority": 3}, approvals=[approval(status)])
+
+    assert result.changed
+    assert result.invalidated == ()
+    assert all(e.kind != EventKind.APPROVAL_INVALIDATED for e in result.events)
 
 
 def test_changing_the_type_alone_keeps_the_flags() -> None:
