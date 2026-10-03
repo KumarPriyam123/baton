@@ -8,7 +8,7 @@ Where the project stands, how to run it, and what to know before the next sessio
 (`repo/stats.py`, `repo/decisions.py`, `api/routers/overview.py`, `api/schemas/overview.py`; decision 51), the
 `/dashboard` and `/decisions` screens, and the notification bell in the rail (`features/dashboard`,
 `features/decisions`, `features/notifications`, `lib/notifications.ts`). Tests: `test_stats.py`,
-`test_decisions.py` (6 API tests: a member vs a lead on a confidential item, figures equal the same person's
+`test_decisions.py` (full API suite at the end: 3,366 passed, 0 skipped, 469 s; 6 of them new: a member vs a lead on a confidential item, figures equal the same person's
 queue lists, paging and filters, 401) and `lib/notifications.test.ts`. Screenshots: `node scripts/management-screens.mjs`
 (`THEME=dark`, `BASE_URL`, `PW_CHANNEL=chrome`). Limits: KNOWN_LIMITATIONS "Phase 11 was lean". Tag: `phase-11-done`.
 Not built: team settings, jobs page, command palette, median age and the 14-day series.
