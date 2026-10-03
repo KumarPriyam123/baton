@@ -69,6 +69,8 @@ STATUS_RULES: dict[str, set[tuple[str, str]]] = {
 # These may legitimately leave the status alone (nothing pending; owner still valid).
 KEEPS_STATUS_OK = {"approval_invalidated", "transferred"}
 SYSTEM_KINDS = {"sla_breached", "duplicate_suggested"}
+# Events that never change the item's version (SPEC 6.2): they carry the current one.
+NON_BUMPING = {"commented", "sla_breached", "duplicate_suggested"}
 ALWAYS_DECISIONS = {
     "resolved",
     "reopened",
@@ -109,6 +111,7 @@ def check_item(item: Row, events: list[Row], approvals: list[Row]) -> list[str]:
     state: dict[str, Any] = dict.fromkeys(TRACKED)
     approved_valid = False
     version = 0
+    previous_kind = ""
     sla_at: datetime | None = None
     approval_state: dict[str, str] = {}
     resolved_at: datetime | None = None
@@ -121,9 +124,15 @@ def check_item(item: Row, events: list[Row], approvals: list[Row]) -> list[str]:
         if n == 0:
             if kind != "created" or at_version != 1:
                 bad(f"first event is {kind} v{at_version}, expected created v1")
+        elif kind in NON_BUMPING:
+            if at_version != version:
+                bad(f"{kind} (event {event['id']}) has v{at_version}, current is v{version}")
         elif at_version not in (version, version + 1):
             bad(f"version jumps from {version} to {at_version} at event {event['id']}")
+        elif at_version == version and previous_kind in NON_BUMPING:
+            bad(f"{kind} (event {event['id']}) changed the item but reused v{version}")
         version = at_version
+        previous_kind = kind
 
         before_status = str(state["status"])
         for name, delta in data.items():

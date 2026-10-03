@@ -121,9 +121,9 @@ Priority is a `smallint` 0–3, shown as P0 (urgent) to P3 (low).
 | due_at | timestamptz NULL | |
 | due_source | due_source | |
 | sla_breached_at | timestamptz NULL | set once by the SLA sweep |
-| last_event_id | bigint NULL | for "what changed last" in lists |
-| last_activity_at | timestamptz | drives "going stale" |
-| version | int NOT NULL default 1 | **optimistic concurrency token** |
+| last_event_id | bigint NULL | for "what changed last" in lists; set by every event |
+| last_activity_at | timestamptz | drives "going stale"; set by events a person wrote, never by system events |
+| version | int NOT NULL default 1 | **optimistic concurrency token**; increments only when a decision-relevant field changes (§6.2) |
 | created_at, updated_at, resolved_at, closed_at | timestamptz | |
 | search | tsvector GENERATED ALWAYS … STORED | see §8 |
 
@@ -159,7 +159,7 @@ Indexes (each one exists for a named query):
 | team_id | uuid | item's team **at the time** of the event |
 | actor_id | uuid FK NULL | NULL = system (worker) |
 | kind | text, CHECK in the event list below | |
-| item_version | int | item version **after** this change |
+| item_version | int | item version **after** this change. Events that do not change a versioned field (`commented`, `sla_breached`, `duplicate_suggested`) carry the item's **current** version |
 | data | jsonb | `{field: {from, to}}` and kind-specific detail |
 | reason | text NULL | required for decisions (see §4) |
 | is_decision | bool | true for the kinds marked ★ below |
@@ -390,7 +390,20 @@ RETURNING *;
 
 - `GET /items/{id}` returns `ETag: "<version>"`.
 - `PATCH` and intent-dependent commands **require** `If-Match: "<version>"` (`428` if missing).
-- The update runs `… WHERE id = :id AND version = :expected`. Zero rows → `412 VERSION_CONFLICT` with `current` (the item now) and `changes_since` (events after the expected version, via `item_events.item_version`). The client uses `changes_since` to show exactly what changed.
+- The update runs `… WHERE id = :id AND version = :expected`. Zero rows → `412 VERSION_CONFLICT` with `current` (the item now) and `changes_since` (the versioned events after the expected version: `item_version > expected`, excluding the kinds below that never bump). The client uses `changes_since` to show exactly what changed.
+
+**What the version counts.** `version` is the item's decision-relevant state: title, description, type, priority, status, assignee, team, due_at, confidential, requires_approval, approval state (requested, approved, rejected, cancelled, invalidated) and resolution. A command that changes any of them increments `version` by exactly 1, however many events it writes; all of its events carry the new version.
+
+Some writes must not make everyone else's `If-Match` stale, so they **never bump** `version`:
+
+| Write | Event row | Updates | Version |
+|---|---|---|---|
+| comment | `commented` | `last_event_id`, `last_activity_at` | unchanged; `item_version` = current |
+| `duplicate_suggested` (worker) | yes | `last_event_id` | unchanged; `item_version` = current |
+| `sla_breached` (worker) | yes | `last_event_id`, `sla_breached_at` | unchanged; `item_version` = current |
+| watch / unwatch | none (no event kind) | only `watchers` | unchanged |
+
+System events leave `last_activity_at` alone, so a machine-written event never resets "going stale". Every event also sets `updated_at`.
 
 | Command | Needs `If-Match`? | Why |
 |---|---|---|
@@ -424,9 +437,10 @@ BEGIN
   idempotency insert (6.3)
   SELECT … FROM work_items WHERE id = :id FOR UPDATE      -- lock order: item first, then approvals
   load actor context; policy check; workflow check
-  apply change (version = version + 1)
-  INSERT item_events (one per change, item_version = new version)
-  UPDATE work_items.last_event_id
+  apply change (version = version + 1, only when a versioned field changed, §6.2)
+  INSERT item_events (one per change; item_version = the new version, or the current
+                      version for commented / sla_breached / duplicate_suggested)
+  UPDATE work_items.last_event_id (and last_activity_at for events a person wrote)
   INSERT outbox (topic 'item.event', payload {event_ids, request_id})
   NOTIFY item_changes '{…}'                                -- delivered only if the transaction commits
   store idempotency response
@@ -448,7 +462,7 @@ COMMIT
 ### 6.6 Reconciling the browser with the server
 
 - The server response is always the truth. After any mutation, the item cache is replaced with the server's item.
-- **Version guard:** an incoming item (refetch, live update, mutation response) replaces the cached one only if `incoming.version >= cached.version`. Out-of-order responses can't roll the screen back.
+- **Version guard:** an incoming item (refetch, live update, mutation response) replaces the cached one only if `(incoming.version, incoming.last_event_id) >= (cached.version, cached.last_event_id)`, compared in that order. Comments do not change `version`, so `last_event_id` breaks the tie. Out-of-order responses can't roll the screen back.
 - **Optimistic where conflicts are rare** (watch, comment, priority): apply at once, roll back on error.
 - **Pending-then-confirmed where conflicts are the point** (claim, approve, resolve): show the button as working, then the server's decision. A claim that loses shows who took it.
 - **Automatic rebase on 412** for field edits: if the fields I changed and the fields they changed don't overlap, re-send my change on the new version and say so ("Saved. Asha's change to priority was kept."). If they overlap, open the conflict dialog.
@@ -542,7 +556,7 @@ Dev-only fault injection: `FAULT_NOTIFY_FAIL_RATE=0.3` makes the notify handler 
 - SSE `id:` is the `event_id`. On reconnect, the browser sends `Last-Event-ID`; the server replays visible events since then from `item_events` (up to 500). If more were missed, it sends `resync` and the client refetches everything on screen.
 - A slow client whose queue fills up gets `resync` and the backlog is dropped, so one slow browser can't hold memory.
 - Heartbeat comment every 15 s. Response headers `Cache-Control: no-cache` and `X-Accel-Buffering: no`; nginx has `proxy_buffering off` for this path.
-- Event types: `item.changed {id, version}`, `notification.created {unread}`, `resync`.
+- Event types: `item.changed {id, version, event_id}`, `notification.created {unread}`, `resync`.
 - The listener connection must be a direct Postgres connection; LISTEN doesn't work through a transaction-mode pooler such as PgBouncer.
 
 ---
@@ -577,7 +591,7 @@ Base path `/api/v1`. JSON. OpenAPI generated by FastAPI at `/api/docs`; the fron
 | POST | `/items/{key}/approvals` | request approval | optional | required |
 | POST | `/items/{key}/approvals/{id}/decision` | `{decision, note}` | optional | **required** |
 | POST | `/items/{key}/approvals/{id}/cancel` | cancel own request | optional | — |
-| GET | `/items/{key}/events` | timeline, paginated; `after_version` | — | — |
+| GET | `/items/{key}/events` | timeline, paginated; `after_event_id` | — | — |
 | POST | `/items/{key}/comments` | add comment | **required** | — |
 | PUT, DELETE | `/items/{key}/watch` | watch, unwatch | — | — |
 | POST | `/items/{key}/read` | record that I've seen this version | — | — |
@@ -593,7 +607,7 @@ Base path `/api/v1`. JSON. OpenAPI generated by FastAPI at `/api/docs`; the fron
 
 ```json
 {
-  "id": "…", "key": "PAY-142", "version": 7,
+  "id": "…", "key": "PAY-142", "version": 7, "last_event_id": 90412,
   "team": {"key": "PAY", "name": "Payments"},
   "type": "payment_investigation", "title": "Refund stuck for order 48213",
   "status": "awaiting_approval", "priority": 1, "confidential": false,

@@ -48,10 +48,12 @@ def test_a_different_seed_gives_different_data() -> None:
 def valid_history() -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     item = make_item(requires_approval=True)
     item.claim(at(5), MEMBER_A)
-    item.request_approval(at(6), MEMBER_A, "please")
-    item.decide(at(7), LEAD_A, approve=True, note="ok")
-    item.resolve(at(8), MEMBER_A, "Fixed.")
-    item.close(at(9), LEAD_A, resolution=Resolution.DONE, reason="Confirmed.")
+    item.comment(at(6), MEMBER_A, "Checking the ledger.")
+    item.request_approval(at(7), MEMBER_A, "please")
+    item.decide(at(8), LEAD_A, approve=True, note="ok")
+    item.resolve(at(9), MEMBER_A, "Fixed.")
+    item.close(at(10), LEAD_A, resolution=Resolution.DONE, reason="Confirmed.")
+    item.comment(at(11), REQUESTER, "Thanks!")
     assert item.requester == REQUESTER
     return records_from_sim(item)
 
@@ -69,6 +71,15 @@ def corrupt(change: str) -> list[str]:
     elif change == "version_gap":
         for event in events[3:]:
             event["item_version"] += 1
+    elif change == "comment_bumps_version":
+        position = next(n for n, e in enumerate(events) if e["kind"] == "commented")
+        for event in events[position:]:
+            event["item_version"] += 1
+    elif change == "change_after_comment_reuses_version":
+        position = next(n for n, e in enumerate(events) if e["kind"] == "commented")
+        for event in events[position + 1 :]:
+            event["item_version"] -= 1
+        item["version"] -= 1
     elif change == "stored_status":
         item["status"] = "in_progress"
     elif change == "stored_version":
@@ -98,6 +109,8 @@ def corrupt(change: str) -> list[str]:
     [
         "missing_event",
         "version_gap",
+        "comment_bumps_version",
+        "change_after_comment_reuses_version",
         "stored_status",
         "stored_version",
         "decision_without_reason",

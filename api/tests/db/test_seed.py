@@ -161,6 +161,22 @@ async def test_twenty_random_items_have_valid_histories(seeded: SeededDatabase) 
         await conn.close()
 
 
+async def test_comments_and_system_events_never_change_the_version(
+    seeded: SeededDatabase,
+) -> None:
+    changed = await _value(
+        seeded,
+        "SELECT count(*) FROM (SELECT kind, item_version, "
+        "lag(item_version) OVER (PARTITION BY item_id ORDER BY id) AS before FROM item_events) e "
+        "WHERE kind IN ('commented', 'sla_breached', 'duplicate_suggested') "
+        "AND item_version IS DISTINCT FROM before",
+    )
+    comments = await _value(seeded, "SELECT count(*) FROM item_events WHERE kind = 'commented'")
+
+    assert comments > 0
+    assert changed == 0
+
+
 async def test_event_ids_follow_time(seeded: SeededDatabase) -> None:
     out_of_order = await _value(
         seeded,

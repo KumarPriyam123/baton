@@ -40,6 +40,49 @@ def test_a_command_with_two_events_uses_one_version() -> None:
     assert kinds(item, 2) == [EventKind.ASSIGNED, EventKind.STATUS_CHANGED]
 
 
+def test_a_comment_writes_an_event_but_does_not_bump_the_version() -> None:
+    item = make_item()
+    item.claim(at(5), MEMBER_A)
+    before = item.version
+
+    item.comment(at(6), MEMBER_B, "Looking at this too.")
+
+    assert item.version == before
+    comment_event = item.events[-1]
+    assert comment_event.kind == EventKind.COMMENTED
+    assert comment_event.version == before  # carries the current version
+    assert item.last_activity_at == at(6)  # a person wrote it
+    assert item.updated_at == at(6)
+    assert item.watchers >= {MEMBER_B}
+
+
+def test_system_events_do_not_bump_the_version_or_reset_going_stale() -> None:
+    item = make_item(priority=0)
+    item.claim(at(5), MEMBER_A)
+    version, activity = item.version, item.last_activity_at
+
+    item.suggest_duplicates(at(6), ["PAY-7"])
+    item.breach(at(300))
+
+    assert item.version == version
+    assert [e.version for e in item.events[-2:]] == [version, version]
+    assert [e.actor for e in item.events[-2:]] == [None, None]
+    assert item.last_activity_at == activity  # machine events are not activity
+    assert item.updated_at == at(300)
+    assert item.sla_breached_at == at(300)
+
+
+def test_the_next_change_after_a_comment_bumps_from_the_unchanged_version() -> None:
+    item = make_item()
+    item.claim(at(5), MEMBER_A)
+    item.comment(at(6), MEMBER_B, "hello")
+
+    item.block(at(7), MEMBER_A, "Waiting on the bank")
+
+    assert item.version == 3  # created 1, claim 2, comment 2, block 3
+    assert [e.version for e in item.events] == [1, 2, 2, 2, 3]
+
+
 def test_claiming_twice_is_not_a_valid_transition() -> None:
     item = make_item()
     item.claim(at(5), MEMBER_A)

@@ -197,11 +197,16 @@ class ItemSim:
     ) -> None:
         self._pending.append(EventRec(kind, actor, self.team.id, data, reason, decision))
 
-    def _seal(self, at: datetime) -> None:
-        """End of a command: one version for everything it emitted."""
+    def _seal(self, at: datetime, *, bump: bool = True) -> None:
+        """End of a command: one version for everything it emitted.
+
+        Comments and system events (sla_breached, duplicate_suggested) pass bump=False: they
+        write an event carrying the current version and never change it (SPEC 6.2).
+        """
         assert self._pending, "a command must write at least one event"
         assert at >= self.last_time, "time must not go backwards"
-        self.version += 1
+        if bump:
+            self.version += 1
         for event in self._pending:
             event.version = self.version
             event.at = at
@@ -499,17 +504,17 @@ class ItemSim:
         self.comments.append(CommentRec(author, body, at))
         self.watchers.add(author)
         self._emit(EventKind.COMMENTED, author, {"excerpt": body[:80]})
-        self._seal(at)
+        self._seal(at, bump=False)
 
     def breach(self, at: datetime) -> None:
         self.sla_breached_at = at
         data = {"due_at": ser(self.due_at), "sla_breached_at": ser(at)}
         self._emit(EventKind.SLA_BREACHED, None, data)
-        self._seal(at)
+        self._seal(at, bump=False)
 
     def suggest_duplicates(self, at: datetime, keys: list[str]) -> None:
         self._emit(EventKind.DUPLICATE_SUGGESTED, None, {"similar": keys})
-        self._seal(at)
+        self._seal(at, bump=False)
 
 
 # ----- runner ----------------------------------------------------------------------------

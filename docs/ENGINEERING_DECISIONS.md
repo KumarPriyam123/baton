@@ -41,12 +41,17 @@ is the only other writer, runs before the app starts, and every history it produ
 checked by `scripts/seedlib/verify.py`. Its transition table is its own (`sim.py`); SPEC 13.1's
 "replay a sample through `workflow.py`" test needs `workflow.py` and is added in phase 4.
 
-## 8. Phase 1: every command that writes an event bumps the item version
+## 8. The version counts decision-relevant state only (decided after phase 1)
 
-Comments and system events (SLA breach, duplicate suggestion) also increment `version`, because
-they write `work_items` (`last_event_id`, `last_activity_at`) and I2 says every such write does.
-That also makes "updated since you looked" and live updates work for comments. All events of one
-command share one `item_version`. To be confirmed when phase 3 writes `record_event()`.
+`version` increments by 1 per command that changes title, description, type, priority, status,
+assignee, team, due_at, confidential, requires_approval, approval state or resolution. Comments,
+`duplicate_suggested` and `sla_breached` write an event carrying the current version and never
+bump it; watch changes write no event. Reason: a comment must not make every other editor's
+`If-Match` stale (412) or force a rebase. Consequences handled in SPEC 6.2, 6.6 and 11:
+`changes_since` lists only versioned events; the timeline cursor is `after_event_id`; the client
+version guard breaks ties with `last_event_id`; "unread" moves to event ids (decision 12).
+System events do not set `last_activity_at` (a machine event must not reset "going stale");
+comments do.
 
 ## 9. Phase 1: event `team_id` is the team at the moment each event is written
 

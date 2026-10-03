@@ -89,8 +89,8 @@ Everything runs in containers so it works the same on Windows, macOS and Linux.
 
 | # | Rule |
 |---|---|
-| I1 | Every change to a work item goes through `record_event()`: exactly one `item_events` row per change, in the **same transaction**, with `item_version` = the new version, plus the outbox row and `NOTIFY`. No other code writes to `work_items`. |
-| I2 | Every write to `work_items` increments `version`. Commands whose meaning depends on what the user saw require `If-Match` (SPEC §6.2). |
+| I1 | Every change to a work item goes through `record_event()`: exactly one `item_events` row per change, in the **same transaction**, with `item_version` = the item's version after the change, plus the outbox row and `NOTIFY`. No other code writes to `work_items`. |
+| I2 | `version` increments by 1 per command that changes a decision-relevant field (title, description, type, priority, status, assignee, team, due_at, confidential, requires_approval, approval state, resolution). Comments, watch changes, `duplicate_suggested` and `sla_breached` do not bump it: they write an event (except watch) with `item_version` = the current version and update `last_event_id`. Commands whose meaning depends on what the user saw require `If-Match` (SPEC §6.2). |
 | I3 | Permissions are decided on the server in `domain/policy.py`. Every query that returns items **or counts** uses `visibility_clause()`. Not visible → 404; visible but not allowed → 403 with a reason. |
 | I4 | Workflow rules live only in `domain/workflow.py`. The UI renders actions from `allowed_actions` and never decides transitions or permissions itself. |
 | I5 | A command is one short transaction via `command_tx()`: lock the item row first, then approvals; no network calls inside; lock and statement timeouts set. |
@@ -101,7 +101,7 @@ Everything runs in containers so it works the same on Windows, macOS and Linux.
 | I10 | Every critical rule in SPEC §3.2 also exists as a database constraint. Application checks give good errors; constraints catch bugs. |
 | I11 | Tests that need Postgres run against real Postgres and **never skip**. Concurrency tests use separate connections released together. |
 | I12 | User content is never rendered as raw HTML. SQL is always parameterised. No secrets, `.env` or the brief PDF in git. |
-| I13 | Frontend server state lives in TanStack Query. Items merge by version (never older over newer). Mutations on one item share a `scope`. |
+| I13 | Frontend server state lives in TanStack Query. Items merge by `(version, last_event_id)` (never older over newer). Mutations on one item share a `scope`. |
 | I14 | UI uses design tokens only (no raw hex outside `tokens.css`), follows DESIGN.md copy, and every async state (loading, empty, error, pending) is designed. |
 
 ## Conventions
