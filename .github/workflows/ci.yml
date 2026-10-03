@@ -81,6 +81,8 @@ jobs:
           if git ls-files | grep -E '\.pdf$|(^|/)\.env$'; then
             echo "::error::A PDF or .env is tracked"; exit 1
           fi
-      - uses: gitleaks/gitleaks-action@v3
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Full history, same pinned version as .pre-commit-config.yaml. The gitleaks action
+      # builds the range "<first commit>^..HEAD", which git rejects for a root commit.
+      - name: gitleaks (full history)
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1             detect --source /repo --redact --no-banner --verbose
