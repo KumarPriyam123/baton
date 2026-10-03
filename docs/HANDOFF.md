@@ -4,7 +4,9 @@ Where the project stands, how to run it, and what to know before the next sessio
 
 ## Current state
 
-**Phase 6 (async worker, lean) is done on top of phase 5 (collaboration, attention, search, also time-boxed). Phase 7 (SSE) has not started.** Tags: `phase-4-done`, `phase-6-done`.
+**Frontend session A (phases 8 and 9, lean) is done on top of phase 6. Phase 7 (SSE) and phase 10 (item detail) have not started.** Tags: `phase-4-done`, `phase-6-done`, `fe-a-done`.
+
+**Frontend session A added** (decision 48; limits in KNOWN_LIMITATIONS "Frontend session A"). `web/src`: `styles/tokens.css` (both themes, avatar hues) + Tailwind v4 mapping in `globals.css`; `lib/api.ts` (ApiError from problem+json, CSRF on unsafe methods and one retry on `CSRF_FAILED`, 401 handler), `api/generated.ts` (from OpenAPI), `api/queries.ts` and `keys.ts`; `lib/itemCache.ts` (`mergeItem`, `upsertItem`, `removeItem`), `lib/useCommand.ts`, `lib/filters.ts` (zod URL filters), `lib/errors.ts` (SPEC 12 copy); `app/` (router, providers, shell with rail, top bar, shortcuts: `j k Enter Esc / c g-i g-q`); `features/auth` (login with demo accounts), `inbox`, `queue` (virtualised list, filter bar with facet counts, search, detail stand-in, "Assign to me"), `create` (New request dialog); `components/ui` (Strip, Button, Field, Menu, Dialog, states, avatar). Tests: 20 Vitest (`itemCache`, `useCommand`, `filters`) and `web/e2e/create-double-submit.spec.ts`. Checked through nginx by hand (see NOTES). **Not built:** `/dev/ui`, command palette, dashboard, decisions, teams, jobs, notifications screens, SSE, axe.
 
 **Phase 6 added** (decision 47): `python -m app.worker` runs the outbox runner (`app/worker/runner.py`: SPEC 9 claim with a 60 s lease, backoff + jitter, dead after 8, SIGTERM-safe) and the SLA sweep every 60 s (`schedules.py`, advisory lock). Handlers: `notify` (`item.event`: requester, assignee, watchers, minus the actor, only `can_view` users), `duplicates` (`item.created`: `item_similar` + one `duplicate_suggested`). `create_item` now enqueues `item.created`. `GET /admin/jobs?status=` and `POST /admin/jobs/{id}/retry`. Compose already scales the worker (`docker compose up --scale worker=2`; checked: both start, one sweep, clean stop). Tests: `tests/integration/test_worker.py` (8: T-OUTBOX 500 jobs two runners, lease takeover, hung handler cut off, backoff to dead + admin retry, double delivery, confidential watcher, duplicates, SLA twice). **Not built:** cleanup job, `FAULT_NOTIFY_FAIL_RATE` (KNOWN_LIMITATIONS, "Phase 6 was lean").
 
@@ -33,7 +35,11 @@ Not built yet, by design: the worker (so the notifications table is only filled 
 | Start everything | `docker compose up --build` (http://localhost:8080; if taken, `WEB_PORT=8081` in `.env` or the shell) |
 | API tests | `docker compose -f compose.yaml -f compose.test.yaml run --rm api-test` (about 165 s) |
 | One test file | `... run --rm api-test pytest tests/integration/test_items_patch.py -q` |
-| Web unit tests | `docker compose -f compose.yaml -f compose.test.yaml run --rm web-test` |
+| Web unit tests | `docker compose -f compose.yaml -f compose.test.yaml run --rm web-test` (20 tests, about 4 s; add `--build` after dependency changes) |
+| Playwright (host) | stack up, then `cd web && BASE_URL=http://localhost:8081 PW_CHANNEL=chrome npx playwright test` (omit `PW_CHANNEL` to use Playwright's own browser after `npx playwright install chromium`) |
+| Screenshots for design review | `cd web && BASE_URL=http://localhost:8081 PW_CHANNEL=chrome node scripts/screenshots.mjs` (`AS="Asha Rao"`, `THEME=dark`); output in `web/test-results/screens` |
+| Regenerate API types | stack up, then `cd web && OPENAPI_URL=http://localhost:8081/api/openapi.json npm run gen:api` |
+| Web checks on the host | `cd web && npx tsc --noEmit && npx eslint . && npx prettier --check .` |
 | After dependency or Dockerfile changes | add `--build`: `run --rm --build api-test` |
 | Re-seed demo from scratch | `docker compose run --rm seed python -m scripts.seed --size demo --reset` |
 | Large seed (**own database**) | `docker compose exec db createdb -U baton baton_large` once; then with `L=postgresql+asyncpg://baton:baton@db:5432/baton_large`: `docker compose run --rm -e DATABASE_URL=$L migrate` and `docker compose run --rm -e DATABASE_URL=$L seed python -m scripts.seed --size large --reset` (about 65 s) |
@@ -63,6 +69,8 @@ curl -b jar 'localhost:8080/api/v1/items?status=new&sort=updated&limit=5'
 - **`compose run` never rebuilds.** `api-test` and `web-test` mount the source; dependency or Dockerfile changes need `--build`. The `api` image does not mount source: rebuild it (`docker compose build api`) before running scripts in it.
 - **Never edit an applied migration.** Add `0005`... (head is `0004`; `/readyz` and a test pin the head).
 - **Sabotage checks only on a committed tree.** My `git checkout -- file` restore wiped uncommitted fixes in phase 3. Commit first, then break, run, restore.
+- **Python edit scripts on Windows write CRLF and use the ANSI code page** unless you pass `encoding="utf-8", newline=""`. Prettier fixes the line endings; a `§` can be mangled. Prefer the Edit tool.
+- **Web: `npm run gen:api` is a Node script** because npm uses cmd.exe on Windows. Strips are a container-query grid (`.strip-link` in `globals.css`); change the layout there, not per screen.
 - **Write files with the Write/Edit tools,** or a script that writes a temp file and `os.replace`s it; a script that opens a file with `"w"` and then crashes leaves it empty. Heredocs with quotes or `\` break in Git Bash.
 - **Warnings are errors in pytest.** A coroutine you forget to await shows up as a failure in some other test.
 - **Middleware order matters** (`app/main.py`): request id outermost, then CSRF, then routing. A bare `curl -X POST` gets 403 `CSRF_FAILED`, not 401 or 404.

@@ -162,3 +162,30 @@ lists only the partial unread one, so it reads and sorts one user's rows. Fine w
   the 50-job batch edge, fan-out to a team's whole watcher list, a lost-lease runner finishing late, the
   advisory-lock-busy path of the sweep, the retry endpoint's idempotency key, and the duplicate finder's
   threshold. No property tests, sabotage checks or independent review.
+
+## Frontend session A (phases 8 and 9) was lean: what is missing, and what is unverified
+
+**Not built (by the time box):** the `/dev/ui` component gallery and the DESIGN 8 component matrix (Popover,
+Drawer, Tabs, Tooltip, DiffView, HandoffTrack, Sparkline, Textarea-with-Preview as a component); the command
+palette; the CI check for raw hex and for generated-types drift (the rule holds by grep today; nothing
+enforces it); the dashboard, decisions, teams, jobs and notification screens (the rail has no links to
+them); the "N items changed, Refresh order" bar (needs SSE, phase 10); the compact-density toggle; the
+offline banner; the `?` shortcut help; the Watch quick action on strips; a searchable team combobox
+(native select instead); a Playwright service in `compose.test.yaml` (the e2e test runs on the host with
+`BASE_URL` and `PW_CHANNEL=chrome`; CLAUDE.md's `--profile e2e` command does not exist yet).
+
+**Approximate on purpose:** the inbox's "Show all" opens the nearest queue filter. "Needs your approval"
+becomes `status=awaiting_approval` (all of them, not only those I can approve) and "Going quiet" becomes
+my in-progress and blocked items sorted by update time; the queue has no filter for either rule.
+Narrow screens (under 768 px) are not designed: the rail stays an icon column and the strips use the
+two-line layout; touch targets are not 44 px.
+
+**Unverified:** the queue on the large seed (1,000+ rows, smooth scroll) was not run; the list is
+virtualised and keyset-paged, and was checked only on the demo data. Dark mode and 375 px
+screenshots were not reviewed (one dark queue screenshot was looked at). No axe run. The ARIA live region
+exists but nothing writes to it yet. Two React Compiler lint warnings remain (`react-hook-form` `watch` and
+TanStack Virtual are not memoisable; harmless, the compiler skips those components).
+
+**Behaviour to know:** the detail pane is a stand-in (decision 48). Changing a filter keeps the previous
+rows on screen, dimmed, until the new ones arrive. The e2e test and my checks left a few
+`E2E ...` requests in the dev database.

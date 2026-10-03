@@ -477,3 +477,38 @@ Decided with the phase 5 prompt; none of them changes a SPEC rule, each fills a 
   that safe. The cleanup job and `FAULT_NOTIFY_FAIL_RATE` are skipped (phase 6 lean).
 - **Admin.** `GET /admin/jobs?status=&cursor=&limit=` (keyset by id) and `POST /admin/jobs/{id}/retry`
   (dead only; 409 otherwise, 404 if missing), admins only.
+
+## 48. Frontend session A (phases 8 and 9, lean): how the client reads SPEC 6.5-6.6 and DESIGN
+
+- **Search is `GET /items?q=`,** not `/search`: the brief's name does not exist (SPEC 8 and 11). A ranked
+  search takes no `sort` and no cursor, so `toListQuery` leaves `sort` out when `q` is set and the same
+  infinite-query hook serves lists and search.
+- **"Open" is four statuses, not an API value.** DESIGN 4.3 presets say `status=open`; the API's
+  `status[]` has no such member. The URL carries `new, in_progress, blocked, awaiting_approval`, and the
+  filter token reads "Status: Open" when exactly that set is selected (`isOpenSet`).
+- **The idempotency key belongs to the user's attempt, not to a call.** `useCommand.execute` creates a key
+  and puts it in the mutation variables, so TanStack's own retries (network, 503 BUSY, three times) reuse
+  it. The New request form owns one key and replaces it only when a field changes or the create succeeds,
+  so a double submit and a retry after a lost response are one request. A client that minted a key per
+  `mutationFn` call would turn every retry into a second item.
+- **`If-Match` is read when the mutation runs,** from the item cache, not when it is queued. With
+  `scope: item:<id>` the second command on an item starts only after the first one's response has been
+  merged, so it carries the new version (unit test: `"7"` then `"8"`).
+- **One truth per item:** `mergeItem` keeps the higher `(version, last_event_id)`; equal replaces, so
+  derived fields (`next_step`) refresh. `upsertItem` writes the detail cache, every list (all under
+  `["items","list"]`) and the inbox; `removeItem` runs on 404. Errors that carry `current` (409, 412)
+  are merged too, then lists refresh.
+- **Layout answers to its own width.** The strip is a CSS grid in a container query: two lines (next step
+  under the title) in the 480 px queue column, one line when wide (inbox). The one-line layout of DESIGN 4.1
+  made titles unreadable next to the 560 px detail pane; DESIGN 3.1's own diagram shows two lines there.
+- **Tokens only:** avatar hues (`--av-0..7`, each at least 5.5 : 1 against white) and `--on-hue` live in
+  `tokens.css`; `--color-*: initial` removes Tailwind's default palette so a stray `stone-900` cannot compile.
+  No raw colour outside `tokens.css` (checked by grep; the CI check is skipped).
+- **Chosen small things:** the team picker is a native `<select>` (type-ahead works; a searchable combobox
+  is not worth 8 teams); "Watch instead" is a plain `PUT /watch`; "Assign to me" is the only strip quick
+  action (it exercises `useCommand` against the real claim); the right-hand pane shows what the list
+  already knows (key, title, status, next step, people) until phase 10 builds the detail screen.
+- **Tooling:** `openapi-typescript` declares TypeScript 5 as a peer; `package.json` `overrides` points it at
+  the repo's TypeScript 6 (it only uses the compiler API). `npm run gen:api` is a Node script because npm
+  runs scripts through cmd.exe on Windows (`${VAR:-x}` fails); `OPENAPI_URL` overrides the default
+  `http://localhost:8080/api/openapi.json`.

@@ -250,6 +250,31 @@ Each entry: **problem → root cause → fix → lesson**.
 **8. Smaller ones**
 - `PlannedEvent` was used in an annotation before it was defined (found by reading, before the first run); the single-writer scanner flagged the word NOTIFY in a comment; mypy cannot infer lambdas passed to a generic racer helper (replaced by `functools.partial`); after a cancel, a second cancel is 403 for a member and 409 for a lead because policy asks who "asked" the pending request (decision 43).
 
+### Frontend session A (phases 8 and 9, lean)
+
+**1. The strip I built from the spec was unreadable in the queue**
+- Problem: with the 560 px detail pane open, the queue column is about 490 px. One line (key, icon, title, chip, avatar, age) left the title about 90 px: "Settlement …".
+- Root cause: DESIGN 4.1 describes the one-line strip; DESIGN 3.1's diagram shows the next step on a second line in that narrow column. I followed 4.1 and only saw the conflict in the screenshot.
+- Fix: the strip is a grid in a container query (`.strip-link` in `globals.css`): two lines under 640 px of its own width, one line above. Same component in the inbox (wide) and queue (narrow).
+- Lesson: look at the screen at the real layout before calling a component done; the spec contradicted itself and only the rendering showed it.
+
+**2. A fade I added for hover actions hid text on rows that had no actions**
+- Problem: the selected row's age read "58" instead of "58d".
+- Root cause: the hover-action wrapper (with a left fade) rendered for every strip, but `AssignToMe` returns nothing when you cannot claim, so an empty wrapper faded the age on hover.
+- Fix: pass `actions` only when `allowed_actions` includes `claim`. Found by zooming a 3x screenshot, not by any test.
+
+**3. A key per call would have made the retry a duplicate**
+- Problem to avoid: the obvious `useMutation` creates the idempotency key inside `mutationFn`; TanStack calls `mutationFn` again on retry, so each retry gets a new key and the server creates a second item.
+- Fix: the key is made in `execute()` and travels in the variables; the form owns one key per attempt. Proof: the Playwright test lets the first POST reach the server and drops the answer; the browser retries; the server answers with `Idempotent-Replayed: true`; one item exists. The unit test pins the same key and the same `If-Match` across a network error, a 503 and the success.
+
+**4. Smaller ones**
+- `openapi-typescript` wants TypeScript 5 and the repo is on 6: an npm `overrides` entry.
+- `npm run gen:api` with `${VAR:-default}` failed because npm uses cmd.exe on Windows; a small Node script replaced it.
+- Python scripts I used for edits wrote CRLF (text-mode `open` on Windows); Prettier normalised it. Use `newline=''` and UTF-8, or the Edit tool.
+- Quotes in a Git Bash heredoc broke a command again (third time); files go through the Write tool.
+- Port 8080 is still held by an unrelated container; the stack ran on `WEB_PORT=8081`.
+- A dialog that centres with `translate(-50%, -50%)` jumps when its entrance animation also sets `transform`; the overlay centres it with grid instead.
+
 ## Explain this phase
 
 ### Phase 0: foundation
@@ -336,3 +361,12 @@ Each entry: **problem → root cause → fix → lesson**.
 3. **Details to be ready for.** Complete/fail are guarded by `status = 'pending'`; a hung handler is cut off at the lease so it cannot block the queue; notify uses `can_view` per recipient; `duplicate_suggested` carries a count, not other items' keys.
 4. **Proved by** `tests/integration/test_worker.py`: 500 jobs on two runners with no double effect, a killed runner's job taken over after the lease, eight failures to `dead` and an admin retry, a double-delivered job with one notification each, two simultaneous SLA sweeps with one event per item.
 5. **Honest gap.** No cleanup job, no fault injection, and the lean test set (KNOWN_LIMITATIONS, "Phase 6 was lean").
+
+### Frontend session A: phases 8 and 9 (lean)
+
+1. **Built.** Design tokens (both themes) with Tailwind mapped to them, self-hosted Atkinson Hyperlegible Next, a typed API client generated from OpenAPI, the shell, login, Inbox, Queue (URL filters, facets, sort, search as you type, virtualised infinite list) and the New request dialog with similar-request suggestions.
+2. **Key decision: one place changes things, and it owns the retry rules.** `useCommand` creates the idempotency key when the user acts and reuses it on every retry (network error or 503 only, three times); reads `If-Match` from the item cache when the mutation actually runs; and serialises one item's mutations with `scope: item:<id>`. The server's item is merged by `(version, last_event_id)`, never older over newer (`itemCache.ts`).
+3. **Alternative.** Mint a key inside each call, or read the version when the click happens. The first turns a retry into a duplicate; the second sends two queued commands with the same stale version and the second gets a 412 against the user's own first change.
+4. **The screens never decide rules.** The strip shows `next_step` and an action only when `allowed_actions` has it; filters live in the URL and are validated by zod, bad values dropped one by one; lists are keyset pages, never loaded whole.
+5. **Proved by.** 20 Vitest tests (`mergeItem`, cache upsert and removal, key and `If-Match` reuse across retries, queued commands in order with the new version, URL round trip) and one Playwright test that drops the first response of a create and still ends with exactly one item and a replay header. I also drove the real stack through nginx: login and return path, `j`/`k`/Enter/Esc, `c`, `/`, typo search with marked words, key jump, empty and 404 states, sign out, and a live claim.
+6. **Honest gap.** No component gallery, palette, axe or large-seed scroll check, and the detail pane is a stand-in until phase 10 (KNOWN_LIMITATIONS, "Frontend session A").

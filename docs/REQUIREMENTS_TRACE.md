@@ -110,8 +110,8 @@ Real stack through nginx on port 8081 (migration head 0004): claim, a losing cla
 |---|---|---|---|---|---|
 | K1 | Two users try to take responsibility for the same work | atomic conditional claim | 4 | T-CLAIM; E2E claim race | ◐ phase 4: T-CLAIM proven (service and HTTP); E2E in 13 |
 | K2 | One user views information another just changed | live updates; version guard; stale banner; If-Match on intent-dependent actions | 3, 7, 10 | SSE tests; E2E live update | ◐ phase 3: ETag, version guard on the server side; SSE in phase 7 |
-| K3 | Multiple updates within a short period | row lock + versions (no lost updates); per-item client mutation queue; event coalescing | 3, 9, 10 | T-STALE; vitest scope test | ◐ phase 3: row lock + versions proven (10 edits on one version: 1 wins); client queue in 9 and 10 |
-| K4 | A user repeats an action, unsure if the first succeeded | idempotency keys in the same transaction; same key on retries | 3, 9 | T-IDEM; E2E double-submit | ◐ phase 3: T-IDEM proven on the server; client key per action in phase 9 |
+| K3 | Multiple updates within a short period | row lock + versions (no lost updates); per-item client mutation queue; event coalescing | 3, 9, 10 | T-STALE; vitest scope test | ◐ phase 3: row lock + versions proven (10 edits on one version: 1 wins); fe-a: `useCommand` `scope: item:<id>` unit-tested (two commands run in order, second with the new `If-Match`); event coalescing in 10 |
+| K4 | A user repeats an action, unsure if the first succeeded | idempotency keys in the same transaction; same key on retries | 3, 9 | T-IDEM; E2E double-submit | ◐ phase 3: T-IDEM proven on the server; fe-a: one key per action reused by every retry (unit-tested) and Playwright double-click with the first response dropped gives one item and an `Idempotent-Replayed` answer; item commands other than create and claim are phase 10 |
 | K5 | Handle at least some deliberately | all four above | — | TESTING.md | ☐ |
 
 ## User experience
@@ -119,9 +119,9 @@ Real stack through nginx on port 8081 (migration head 0004): claim, a losing cla
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
 |---|---|---|---|---|---|
 | U1 | Useful overview of ongoing work | Inbox + Dashboard | 9, 11 | screenshots | ☐ |
-| U2 | Quickly see what requires attention | attention sections; next-step chips | 5, 9 | attention tests | ☐ |
-| U3 | Find relevant work without browsing everything | filters in URL, facets, full-text + fuzzy search, key jump, command palette | 5, 9 | search tests; E2E | ☐ |
-| U4 | Usable as stored work grows | keyset pagination, virtualised list, indexes, ranked search capped | 3, 9, 12 | PERFORMANCE.md on large seed | ◐ phase 3: keyset pagination over 1,000 items, EXPLAIN on the large seed (decision 32); UI in 9, numbers in 12 |
+| U2 | Quickly see what requires attention | attention sections; next-step chips | 5, 9 | attention tests | ◐ fe-a: Inbox sections and next-step chips built and checked in the browser (screenshot reviewed against DESIGN); no Playwright test for it |
+| U3 | Find relevant work without browsing everything | filters in URL, facets, full-text + fuzzy search, key jump, command palette | 5, 9 | search tests; E2E | ◐ fe-a: URL filters (zod, round-trip tested), facet counts, sort, search as you type with marked words and typo tolerance, key jump: driven in the browser; command palette skipped |
+| U4 | Usable as stored work grows | keyset pagination, virtualised list, indexes, ranked search capped | 3, 9, 12 | PERFORMANCE.md on large seed | ◐ phase 3: keyset pagination over 1,000 items, EXPLAIN on the large seed (decision 32); fe-a: virtualised infinite list built, **not yet run on the large seed**; numbers in 12 |
 | U5 | Coherent, responsive experience over decorative UI | DESIGN.md principles; performance budgets; designed states | 8–11 | screenshots; axe; budgets | ☐ |
 
 ## System behaviour
