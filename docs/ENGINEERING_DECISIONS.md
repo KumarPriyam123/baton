@@ -141,3 +141,100 @@ so it is not problem+json. `/healthz` stays pure liveness.
 
 SPEC 11 marks it optional there. Adding a member is naturally idempotent (same role: 200, no change),
 and the idempotency layer arrives in phase 3.
+
+## 23. Phase 3: an index on approvals by item (migration 0004)
+
+SPEC 3.2 lists no index on `approvals` except the partial unique one for pending requests. The item
+view shows the newest approval (`ORDER BY requested_at DESC LIMIT 1`) and a command asks whether a
+pending or approved one exists; both look up approvals by item. `approvals_item_idx (item_id,
+requested_at DESC)` serves both. `tests/db/test_indexes.py` lists it as an addition to the SPEC set.
+
+## 24. Phase 3: `command_tx` is one attempt, `run_command` is the retry
+
+BUILD_PLAN asks for a context manager that also retries the transaction on 40001/40P01, but a context
+manager cannot run its own body twice. `command_tx(conn)` starts the transaction (`SET LOCAL
+lock_timeout '2s'`, `statement_timeout '5s'`) and turns database errors into domain errors (lock or
+statement timeout: 503 BUSY with `Retry-After`; a named constraint: the error in `db/errors.py`).
+`run_command(conn, work)` calls it up to 3 times; after the third failure it answers 503 BUSY. Work
+must be safe to run again from the start. A test lists every CHECK and partial unique index in the
+schema and fails if one is neither mapped nor declared a bug. The session "touch" that
+`sessions.authenticate` writes at most once a minute stays outside (it is infrastructure, not a command).
+
+## 25. Phase 3: one outbox row per event, not per command
+
+SPEC 6.4 draws one outbox row for a command; BUILD_PLAN and CLAUDE.md I1 describe `record_event`
+writing "the outbox row and NOTIFY" for each change. `record_event` writes one row per event with
+payload `{event_ids: [id], request_id}`, so the phase 6 handler (keyed by event id, `UNIQUE (user_id,
+event_id)`) is the same either way. NOTIFY is also per event.
+
+## 26. Phase 3: what a PATCH writes
+
+- Permissions are checked for every field the client **sent**, even if the value is unchanged.
+  Permission (403) is judged before the version (412), so a stale request from someone who may not
+  edit learns nothing.
+- One command bumps `version` by exactly 1 and writes one event per kind: `field_changed` (title,
+  description, type, manual `due_at`, all in one event), `priority_changed` (with the recomputed
+  `due_at` in its data), `confidential_changed` (always a decision; the reason is optional because
+  SPEC 4.2 does not require one), `requires_approval_changed` (a decision when turned off; reason
+  required then). All carry the new version.
+- An edit that changes nothing is 200 with no version, no event and no outbox row.
+- `due_at` cannot be null in a PATCH; a lead's date sets `due_source = manual` for good.
+- `apply_type_defaults` (with `type`) resets `requires_approval` and `confidential` to the new type's
+  defaults; what the lead asked for in the same request wins. The reason rules still apply.
+- `changes_since` is capped at 100 events (a bound, not a page).
+
+## 27. Phase 3: material edits are refused while an approval is on record (until phase 4)
+
+SPEC 4.4 says a material edit invalidates approvals. That is phase 4, but seeded data already has
+`awaiting_approval` and approved items. Rather than let a title change slip past an approval (SPEC A6),
+a PATCH of `title`, `description` or `type` on an item with a pending or approved approval returns 409
+`WORKFLOW_VIOLATION`, and `allowed_actions` leaves out `edit_text` and `edit_type`. Phase 4 replaces the
+refusal with the invalidation. `requires_approval` cannot change while `awaiting_approval` (SPEC 4.2).
+
+## 28. Phase 3: the create body
+
+`team_key`, `type`, `title`, `description` (default empty), `priority` (default 2), `requires_approval`.
+`requires_approval: true` is accepted only for an ops task (SPEC 3.1) or when the type already
+requires it; anything else is 400 on that field. There is no `confidential` at creation: it comes
+from the type. A missing `Idempotency-Key` is 400 (SPEC 12 has no better row) and the OpenAPI document
+marks the header required. An unknown `team_key` is 400 on that field, not 404.
+
+## 29. Phase 3: list parameters
+
+`status[]`, `priority[]` and `type[]` are repeated parameters (`status=new&status=blocked`). Unknown
+query parameters are 400 rather than ignored, so a filter that is silently dropped cannot show the
+wrong items; `q` is reserved for phase 5 and is refused until then. `overdue` means open and past
+`due_at`. `updated_since` is inclusive and needs a time zone. Facets apply all the current filters
+(the literal reading of SPEC 8) and list a value only if it has items. Sorts: `updated` and `created`
+break ties by `id DESC` to match the DESC indexes. A cursor names its sort and is refused by another.
+Items and events: default 50, max 100 (members and users keep 20/50). The timeline is oldest first
+by default, `order=desc` for newest first, and `after_event_id` is the cursor in either direction.
+
+## 30. Phase 3: `next_step` is the whole SPEC 4.5 table
+
+BUILD_PLAN says placeholder. A wrong placeholder is worse than a small pure function with unit tests,
+so `workflow.next_step` implements every row. The blocked reason is the reason of the newest `blocked`
+event, fetched only for blocked items.
+
+## 31. Phase 3: idempotency details
+
+The fingerprint is exactly SPEC 3.2 (method, path, canonical body): `If-Match` is not part of it.
+Domain 4xx answers are stored, including 403 and 404 and a replayed 412; BUSY and 5xx are not. Keys
+older than 24 h are removed by the phase 6 cleanup job; until it exists, an old key still replays.
+Header parameters of the dependencies are named `idempotency_key`, not `key`, which clashes with the
+`{key}` path parameter in FastAPI.
+
+## 32. Phase 3: pages are cut before they are decorated; one EXPLAIN finding
+
+The first list query joined teams, users, the newest approval (LATERAL) and the last event for every
+row before sorting. On the large seed (50,000 items) that was 20-110 ms. `list_items` now filters,
+orders and limits `work_items` in an inner query and joins only the 51 rows of the page (3-12 ms for
+leads and members). **Still open for phase 12:** an admin's unfiltered list sorts all of `work_items`
+(about 20 ms), and decision 10 (expression indexes for `COALESCE(due_at, 'infinity')`) is the fix.
+`facets` is one aggregate query (GROUPING SETS), 9-35 ms.
+
+## 33. Phase 3: operation ids are the route function names
+
+`generate_unique_id_function` returns the function name, so the generated client does not change when
+a route moves (FastAPI's default ends in path and method). A test fails if an operation lacks an id,
+a typed response or a typed request body.

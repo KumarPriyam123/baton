@@ -49,3 +49,24 @@ reassign or release them first (ENGINEERING_DECISIONS 14).
 SPEC 11), and matches with `ILIKE`, which scans the `users` table. That is fine at a few thousand
 rows; a `pg_trgm` index would be the next step. The demo-account list recognises personas by having no
 digit in the email (`aarav.gupta17@...` is generated, `priya.lead@...` is not).
+
+## Old idempotency keys still replay until the cleanup job exists
+
+SPEC 6.3 says keys expire after 24 hours, which the phase 6 cleanup job enforces. Until then a key
+is honoured for as long as its row exists. Browsers create a fresh random key per action, so this
+only matters for a client that reuses keys.
+
+## Material edits are refused while an approval is on record (until phase 4)
+
+See ENGINEERING_DECISIONS 27. Editing the title, description or type of an item that has a pending
+or approved approval is a 409 for now, instead of invalidating the approval.
+
+## An admin's unfiltered item list sorts the whole table
+
+About 20 ms on 50,000 items, on every page. It needs the expression indexes of decision 10, which
+phase 12 measures (ENGINEERING_DECISIONS 32).
+
+## `changes_since` shows at most the 100 oldest changes
+
+A client that was offline through more than 100 versioned changes gets the first 100 plus the item as
+it is now, which is what the conflict dialog needs. It is not a history view (use the events endpoint).
