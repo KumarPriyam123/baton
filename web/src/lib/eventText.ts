@@ -55,6 +55,7 @@ export function describeEvent(event: EventOut, names: NameLookup): string {
       const assignee = to(data, "assignee");
       const previous = from(data, "assignee");
       const who = names.person(assignee);
+      if (!previous && event.actor && event.actor.id === assignee) return "took this";
       if (previous) return `reassigned this from ${names.person(previous)} to ${who}`;
       return `assigned this to ${who}`;
     }

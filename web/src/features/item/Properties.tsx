@@ -25,17 +25,32 @@ import { PriorityGlyph } from "../../components/ui/PriorityGlyph";
 import { StatusIcon } from "../../components/ui/Strip";
 import { ApiError, type ItemOut, api, unwrap } from "../../lib/api";
 import { notifyError } from "../../lib/errors";
-import { PRIORITY_LABEL, STATUS_LABEL, TYPE_LABEL, ageShort, fullTime } from "../../lib/format";
+import {
+  PRIORITY_LABEL,
+  RESOLUTION_LABEL,
+  STATUS_LABEL,
+  TYPE_LABEL,
+  ageShort,
+  fullTime,
+} from "../../lib/format";
 import { describeKept } from "../../lib/rebase";
 import { useCommand } from "../../lib/useCommand";
 import { useSaveFields } from "./useSaveFields";
+
+/** "3 h" under two days, then days: the same units as the next-step chip. */
+function overdueSpan(ms: number): string {
+  const hours = Math.floor(ms / 3_600_000);
+  if (hours < 1) return "under an hour";
+  if (hours < 48) return `${String(hours)} h`;
+  return `${String(Math.floor(hours / 24))} days`;
+}
 
 function dueText(item: ItemOut, now: number): { text: string; late: boolean } {
   if (!item.due_at) return { text: "No due date", late: false };
   const when = new Date(item.due_at).getTime();
   const open = item.status !== "resolved" && item.status !== "closed";
   if (open && when < now) {
-    return { text: `Overdue by ${ageShort(item.due_at, now)}`, late: true };
+    return { text: `Overdue by ${overdueSpan(now - when)}`, late: true };
   }
   return { text: fullTime(item.due_at), late: false };
 }
@@ -267,7 +282,7 @@ export function Properties({
           )}
         </Row>
         <Row label="Needs approval">{item.requires_approval ? "Yes" : "No"}</Row>
-        {item.resolution && <Row label="Resolution">{item.resolution.replace(/_/g, " ")}</Row>}
+        {item.resolution && <Row label="Resolution">{RESOLUTION_LABEL[item.resolution]}</Row>}
         {canWatch && (
           <Row label="Watching">
             <Button

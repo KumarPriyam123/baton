@@ -36,6 +36,13 @@ export const TYPE_LABEL = {
   ops_task: "Ops task",
 } as const;
 
+export const RESOLUTION_LABEL = {
+  done: "Done",
+  duplicate: "Duplicate",
+  wont_do: "Won't do",
+  cannot_reproduce: "Can't reproduce",
+} as const;
+
 export const PRIORITY_LABEL = ["P0", "P1", "P2", "P3"] as const;
 
 /** Due date for a priority, from SPEC §4.2: P0 4 h, P1 24 h, P2 3 days, P3 7 days. */

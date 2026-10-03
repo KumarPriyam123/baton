@@ -319,6 +319,12 @@ export const Timeline = forwardRef<
   );
 });
 
+/** The API sends the comment text on live events; older seeded events only carry an excerpt. */
+function commentText(event: EventOut): string {
+  if (event.comment_body) return event.comment_body;
+  return typeof event.data.excerpt === "string" ? event.data.excerpt : "";
+}
+
 function EventRow({ event, names, now }: { event: EventOut; names: NameLookup; now: number }) {
   const when = (
     <time
@@ -340,7 +346,7 @@ function EventRow({ event, names, now }: { event: EventOut; names: NameLookup; n
             {when}
           </p>
           <div className="mt-1">
-            <Markdown>{event.comment_body ?? ""}</Markdown>
+            <Markdown>{commentText(event)}</Markdown>
           </div>
         </div>
       </div>

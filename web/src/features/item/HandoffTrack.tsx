@@ -14,7 +14,7 @@ import { fullTime } from "../../lib/format";
 import { type Segment, durationLabel, segmentWeight } from "./track";
 
 function clock(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 function rangeText(segment: Segment, ended: boolean): string {
