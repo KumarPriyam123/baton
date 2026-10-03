@@ -24,12 +24,12 @@ services:
       timeout: 3s
       retries: 20
 
-  # One-shot. Phase 1 replaces the command with `alembic upgrade head`.
+  # One-shot: brings the schema to head, then exits. api and worker wait for it.
   migrate:
     build:
       context: ./api
     environment: *api-env
-    command: ["sh", "-c", "echo 'migrate: no migrations yet (arrives in phase 1)'"]
+    command: ["alembic", "upgrade", "head"]
     depends_on:
       db:
         condition: service_healthy

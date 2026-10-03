@@ -20,6 +20,7 @@ CMD ["pytest"]
 FROM base AS runtime
 RUN uv sync --frozen --no-dev
 COPY app ./app
+COPY alembic.ini ./
 COPY alembic ./alembic
 COPY scripts ./scripts
 RUN useradd --system --uid 10001 --no-create-home baton
