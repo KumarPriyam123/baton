@@ -31,7 +31,7 @@ def _clean_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def test_database_url() -> str:
     return os.environ["TEST_DATABASE_URL"]
 
