@@ -10,7 +10,7 @@ from app.domain.enums import Resolution
 from scripts.seedlib import generate as g
 from scripts.seedlib.verify import check_item
 
-from .seed_fixtures import LEAD_A, MEMBER_A, REQUESTER, at, make_item
+from .seed_fixtures import LEAD_A, MEMBER_A, REQUESTER, at, make_item, make_team
 from .seed_records import records_from_dataset, records_from_sim
 
 NOW = datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
@@ -68,6 +68,32 @@ def valid_history() -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str
     item.comment(at(11), REQUESTER, "Thanks!")
     assert item.requester == REQUESTER
     return records_from_sim(item)
+
+
+def transfer_history() -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    item = make_item(requires_approval=True)
+    item.claim(at(5), MEMBER_A)
+    item.request_approval(at(6), MEMBER_A, None)
+    item.transfer(at(7), LEAD_A, make_team("SUP", n=200), "Routed to the wrong team.")
+    return records_from_sim(item)
+
+
+def test_a_transfer_history_is_valid_and_stamps_events_with_the_new_team() -> None:
+    item, events, approvals = transfer_history()
+
+    assert check_item(item, events, approvals) == []
+    last_command = [e for e in events if e["item_version"] == item["version"]]
+    assert {e["team_id"] for e in last_command} == {item["team_id"]}
+
+
+def test_verifier_rejects_an_event_stamped_with_the_old_team_in_a_transfer() -> None:
+    item, events, approvals = transfer_history()
+    cancelled = next(e for e in events if e["kind"] == "approval_cancelled")
+    cancelled["team_id"] = events[0]["team_id"]  # the team before the transfer
+
+    problems = check_item(item, events, approvals)
+
+    assert any("lacks the item's team" in p for p in problems)
 
 
 def test_the_baseline_history_is_valid() -> None:

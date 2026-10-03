@@ -207,8 +207,9 @@ def test_transfer_keeps_the_key_moves_the_team_and_drops_an_owner_who_is_not_the
         EventKind.APPROVAL_CANCELLED,
         EventKind.TRANSFERRED,
     ]
-    assert item.events[-1].team_id == other.id  # stamped with the team after the change
-    assert item.events[-2].team_id == uid(100)  # the cancellation happened in the old team
+    # every event of the command carries the team the item has afterwards
+    assert [e.team_id for e in item.events if e.version == item.version] == [other.id, other.id]
+    assert item.events[0].team_id == uid(100)  # earlier events keep the team they were written in
 
 
 def test_reopen_returns_to_the_previous_owner_when_they_can_still_work_it() -> None:

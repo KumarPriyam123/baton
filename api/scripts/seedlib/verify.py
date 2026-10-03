@@ -114,6 +114,7 @@ def check_item(
     approved_valid = False
     version = 0
     previous_kind = ""
+    command_events: list[Row] = []
     sla_at: datetime | None = None
     approval_state: dict[str, str] = {}
     resolved_at: datetime | None = None
@@ -164,8 +165,13 @@ def check_item(
         if ends_command and state["resolution"] == "duplicate" and state["duplicate_of"] is None:
             bad(f"after {kind} resolution duplicate has no target")
 
-        if str(event["team_id"]) != state["team"]:
-            bad(f"{kind} event {event['id']} is stamped with the wrong team")
+        command_events.append(event)
+        if ends_command:
+            # Every event of a command carries the team the item has when the command ends.
+            for written in command_events:
+                if str(written["team_id"]) != state["team"]:
+                    bad(f"{written['kind']} event {written['id']} lacks the item's team")
+            command_events = []
         if (event["actor_id"] is None) != (kind in SYSTEM_KINDS):
             bad(f"{kind} has the wrong actor ({event['actor_id']})")
         expected_decision = kind in ALWAYS_DECISIONS

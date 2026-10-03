@@ -156,7 +156,7 @@ Indexes (each one exists for a named query):
 |---|---|---|
 | id | bigint identity PK | ordering and cursor |
 | item_id | uuid FK | |
-| team_id | uuid | item's team **at the time** of the event |
+| team_id | uuid FK | the item's team **after** the change: every event of a command carries the team the item has when the command ends. For a transfer, all of its events carry the new team |
 | actor_id | uuid FK NULL | NULL = system (worker) |
 | kind | text, CHECK in the event list below | |
 | item_version | int | item version **after** this change. Events that do not change a versioned field (`commented`, `sla_breached`, `duplicate_suggested`) carry the item's **current** version |

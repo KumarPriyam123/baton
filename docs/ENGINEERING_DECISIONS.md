@@ -53,11 +53,13 @@ version guard breaks ties with `last_event_id`; "unread" moves to event ids (dec
 System events do not set `last_activity_at` (a machine event must not reset "going stale");
 comments do.
 
-## 9. Phase 1: event `team_id` is the team at the moment each event is written
+## 9. Event `team_id` is the item's team after the change (decided after phase 1)
 
-For a transfer, the `transferred` event carries the new team; an `approval_cancelled` written in
-the same command before the team moves carries the old team. SPEC 3.2 says only "item's team at
-the time of the event". To be confirmed in phase 4.
+Every event of a command carries the team the item has when the command ends. For a transfer that
+is the new team, including an `approval_cancelled` written in the same command. Reason: one rule,
+easy to check, and the decision log of the receiving team shows the transfer that brought the
+item to it. The seed verifier checks it at each command boundary. `item_events.team_id` also has a
+foreign key to `teams` (migration 0001).
 
 ## 10. Phase 1: indexes are exactly the SPEC list; sort-expression question deferred
 

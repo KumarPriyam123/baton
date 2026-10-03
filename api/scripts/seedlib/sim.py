@@ -210,6 +210,7 @@ class ItemSim:
         for event in self._pending:
             event.version = self.version
             event.at = at
+            event.team_id = self.team.id  # the team after the change, for the whole command
         self.events.extend(self._pending)
         if any(e.actor is not None for e in self._pending):
             self.last_activity_at = at
