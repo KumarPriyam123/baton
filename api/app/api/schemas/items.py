@@ -108,6 +108,7 @@ class ItemOut(BaseModel):
     allowed_actions: list[Action]
     last_event: LastEventOut | None
     unread_since_event_id: int | None
+    watching: bool
     created_at: datetime
     updated_at: datetime
     resolved_at: datetime | None
@@ -177,6 +178,7 @@ class ItemOut(BaseModel):
             allowed_actions=view.allowed_actions,
             last_event=last_event,
             unread_since_event_id=r.unread_since_event_id,
+            watching=r.watching,
             created_at=r.created_at,
             updated_at=r.updated_at,
             resolved_at=r.resolved_at,
@@ -208,6 +210,9 @@ class EventOut(BaseModel):
     reason: str | None
     is_decision: bool
     created_at: datetime
+    comment_body: str | None = Field(
+        None, description="The comment's text, for `commented` events."
+    )
 
     @classmethod
     def from_record(cls, e: EventRecord) -> Self:
@@ -220,6 +225,7 @@ class EventOut(BaseModel):
             reason=e.reason,
             is_decision=e.is_decision,
             created_at=e.created_at,
+            comment_body=e.comment_body,
         )
 
 

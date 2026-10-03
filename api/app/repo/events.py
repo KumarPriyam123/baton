@@ -27,10 +27,11 @@ class EventRecord:
     reason: str | None
     is_decision: bool
     created_at: datetime
+    comment_body: str | None = None  # the text, for `commented` events only
 
 
 def _query() -> sa.Select[Any]:
-    e, u = schema.item_events.c, schema.users.c
+    e, u, c = schema.item_events.c, schema.users.c, schema.comments.c
     return sa.select(
         e.id,
         e.kind,
@@ -41,7 +42,17 @@ def _query() -> sa.Select[Any]:
         e.reason,
         e.is_decision,
         e.created_at,
-    ).select_from(schema.item_events.outerjoin(schema.users, u.id == e.actor_id))
+        c.body.label("comment_body"),
+    ).select_from(
+        schema.item_events.outerjoin(schema.users, u.id == e.actor_id).outerjoin(
+            schema.comments,
+            # The comment text rides along with its event, so the timeline is one query (SPEC 3.2).
+            sa.and_(
+                e.kind == EventKind.COMMENTED.value,
+                c.id == sa.cast(e.data["comment_id"].astext, sa.BigInteger),
+            ),
+        )
+    )
 
 
 def _record(row: sa.Row[Any]) -> EventRecord:
@@ -55,6 +66,7 @@ def _record(row: sa.Row[Any]) -> EventRecord:
         reason=row.reason,
         is_decision=row.is_decision,
         created_at=row.created_at,
+        comment_body=row.comment_body,
     )
 
 

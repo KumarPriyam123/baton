@@ -8,7 +8,7 @@ from app.api.preconditions import etag
 from app.api.problem import PROBLEM_JSON
 
 
-def respond(outcome: Outcome, *, location: bool = False) -> JSONResponse:
+def respond(outcome: Outcome, *, location: bool = False, with_etag: bool = True) -> JSONResponse:
     """The stored (or fresh) answer as an HTTP response. Headers that depend on the body, ETag
     and Location, are rebuilt from it, so a replay carries them too."""
     headers: dict[str, str] = {}
@@ -18,7 +18,8 @@ def respond(outcome: Outcome, *, location: bool = False) -> JSONResponse:
         return JSONResponse(
             outcome.body, status_code=outcome.status, media_type=PROBLEM_JSON, headers=headers
         )
-    headers["ETag"] = etag(outcome.body["version"])
+    if with_etag:
+        headers["ETag"] = etag(outcome.body["version"])
     if location:
         headers["Location"] = f"{API_PREFIX}/items/{outcome.body['key']}"
     return JSONResponse(outcome.body, status_code=outcome.status, headers=headers)

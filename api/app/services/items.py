@@ -31,7 +31,7 @@ class ItemView:
     next_step: workflow.NextStep
 
 
-def _facts(record: items_repo.ItemRecord) -> ItemFacts:
+def facts_of(record: items_repo.ItemRecord) -> ItemFacts:
     pending_by = (
         record.approval_requested_by_id
         if record.approval_status == ApprovalStatus.PENDING
@@ -61,7 +61,7 @@ def _workflow_facts(record: items_repo.ItemRecord) -> workflow.WorkflowFacts:
 
 
 def build_view(record: items_repo.ItemRecord, ctx: ActorContext, now: datetime) -> ItemView:
-    facts = _facts(record)
+    facts = facts_of(record)
     allowed = workflow.allowed_actions(ctx, facts, _workflow_facts(record))
     role = ctx.roles.get(record.team_id)
     step = workflow.next_step(

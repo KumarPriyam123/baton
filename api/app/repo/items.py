@@ -86,6 +86,7 @@ class ItemRecord:
     last_event_actor_name: str | None
     last_event_at: datetime | None
     unread_since_event_id: int | None
+    watching: bool
     blocked_reason: str | None
 
     @staticmethod
@@ -217,6 +218,9 @@ def _item_query(ctx: ActorContext, page: Subquery) -> Select[Any]:
             ),
             else_=None,
         ).label("unread_since_event_id"),
+        sa.exists()
+        .where(schema.watchers.c.item_id == b.id, schema.watchers.c.user_id == ctx.user_id)
+        .label("watching"),
         sa.case((b.status == ItemStatus.BLOCKED.value, blocked_reason), else_=None).label(
             "blocked_reason"
         ),
