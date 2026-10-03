@@ -142,3 +142,23 @@ write, each attention rule, the search rules). Deliberately left out, so nobody 
 Known and not fixed: the full notification list (`unread=false`) has no index of its own, since SPEC 3.2
 lists only the partial unread one, so it reads and sorts one user's rows. Fine while the cleanup job
 (phase 6) keeps them bounded; a `(user_id, id DESC)` index is the fix if `EXPLAIN` asks for it.
+
+## Phase 6 was lean: what the worker does not do, and what is not tested
+
+- **No cleanup job.** Idempotency keys older than 24 h, expired sessions and `done` outbox rows are never
+  deleted, so those tables grow and old keys still replay (see the entry above). `FAULT_NOTIFY_FAIL_RATE`
+  is read by `Settings` but nothing uses it yet.
+- **A handler's work and the `done` mark are two transactions.** A crash between them runs the job again;
+  every handler is idempotent, so the result is the same, but it is the at-least-once cost.
+- **A job runs sequentially inside a batch of 50 with one lease for all of them.** Fast handlers never
+  come near 60 s; a slow batch could see its later jobs taken over by another runner while still queued
+  here (they would then run twice, harmlessly).
+- **The SLA sweep runs on every worker every 60 s.** The advisory lock only stops two at once; a worker
+  that waits for the lock does not queue. Cheap, and correct.
+- **Notify judges visibility against the item now,** not at the time of the event. Someone who lost access
+  between the two is not told; someone who gained it is.
+- **Not tested (time box):** a stopped worker catching up through real `docker compose` processes (checked
+  by hand: two workers start, one SLA sweep ran, both stop cleanly on SIGTERM), SIGTERM mid-batch release,
+  the 50-job batch edge, fan-out to a team's whole watcher list, a lost-lease runner finishing late, the
+  advisory-lock-busy path of the sweep, the retry endpoint's idempotency key, and the duplicate finder's
+  threshold. No property tests, sabotage checks or independent review.

@@ -328,3 +328,11 @@ Each entry: **problem → root cause → fix → lesson**.
 3. **Second decision: a comment never bumps `version`** (decision 8), so "unread" is an event id, and the read marker is one `INSERT ... SELECT ... ON CONFLICT` that applies visibility and `GREATEST` itself.
 4. **Alternative / what it costs.** A ranked search has no cursor on purpose; "your requests" counts only activity by someone else (decision 46).
 5. **Honest gap.** One test per rule only: no T-VIS property test, query-count guard, EXPLAIN, sabotage or independent review (KNOWN_LIMITATIONS, "Phase 5 was time-boxed").
+
+### Phase 6: async worker (lean)
+
+1. **Built.** An outbox runner (claim with `FOR UPDATE SKIP LOCKED` and a lease, backoff + jitter, dead after 8, graceful stop), notify and duplicate handlers, an SLA sweep under an advisory lock, and admin jobs + retry.
+2. **Key decision: at-least-once delivery with idempotent effects,** not exactly-once machinery. A crashed runner just stops renewing its lease; the effect is guarded by `UNIQUE (user_id, event_id)`, the upsert, or the `sla_breached_at IS NULL` guard, so running twice is harmless.
+3. **Details to be ready for.** Complete/fail are guarded by `status = 'pending'`; a hung handler is cut off at the lease so it cannot block the queue; notify uses `can_view` per recipient; `duplicate_suggested` carries a count, not other items' keys.
+4. **Proved by** `tests/integration/test_worker.py`: 500 jobs on two runners with no double effect, a killed runner's job taken over after the lease, eight failures to `dead` and an admin retry, a double-delivered job with one notification each, two simultaneous SLA sweeps with one event per item.
+5. **Honest gap.** No cleanup job, no fault injection, and the lean test set (KNOWN_LIMITATIONS, "Phase 6 was lean").

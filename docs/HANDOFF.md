@@ -4,7 +4,9 @@ Where the project stands, how to run it, and what to know before the next sessio
 
 ## Current state
 
-**Phase 5 (collaboration, attention, search) is built and time-boxed; see "Phase 5" below for what it did and did not test. Phase 6 has not started.** Tags: `phase-4-start`, `phase-4-done`.
+**Phase 6 (async worker, lean) is done on top of phase 5 (collaboration, attention, search, also time-boxed). Phase 7 (SSE) has not started.** Tags: `phase-4-done`, `phase-6-done`.
+
+**Phase 6 added** (decision 47): `python -m app.worker` runs the outbox runner (`app/worker/runner.py`: SPEC 9 claim with a 60 s lease, backoff + jitter, dead after 8, SIGTERM-safe) and the SLA sweep every 60 s (`schedules.py`, advisory lock). Handlers: `notify` (`item.event`: requester, assignee, watchers, minus the actor, only `can_view` users), `duplicates` (`item.created`: `item_similar` + one `duplicate_suggested`). `create_item` now enqueues `item.created`. `GET /admin/jobs?status=` and `POST /admin/jobs/{id}/retry`. Compose already scales the worker (`docker compose up --scale worker=2`; checked: both start, one sweep, clean stop). Tests: `tests/integration/test_worker.py` (8: T-OUTBOX 500 jobs two runners, lease takeover, hung handler cut off, backoff to dead + admin retry, double delivery, confidential watcher, duplicates, SLA twice). **Not built:** cleanup job, `FAULT_NOTIFY_FAIL_RATE` (KNOWN_LIMITATIONS, "Phase 6 was lean").
 
 **Phase 5 added** (decision 46): `POST /items/{key}/comments` (key required, `commented` event, author auto-watches, answers `{comment, item}`); `PUT|DELETE /items/{key}/watch`; `POST /items/{key}/read` (upsert of `item_reads.last_read_event_id`); `GET /me/attention` (five sections, 10 items, counts capped at 100); `GET /me/notifications` and `POST /me/notifications/read`; `q` on `GET /items` and `/items/facets` (key jump, else full-text + trigram, top 50, no cursor); `GET /items/similar?team_id&title`; `comment_body` on timeline events; `watching` on the item; `id` on `GET /teams`. New code: `repo/{collab,search,attention,notifications}.py`, `services/comments.py`, `api/routers/collab.py` and `me.py`. Tests: `test_collaboration.py`, `test_search.py`, `test_attention.py`, `test_notifications.py`, and the phase 3 confidentiality test extended. **Not built:** the worker that creates notifications (phase 6), stats and decisions (phase 11). Untested by design: `docs/KNOWN_LIMITATIONS.md`, "Phase 5 was time-boxed".
 
@@ -98,8 +100,9 @@ Read `docs/ENGINEERING_DECISIONS.md` 35-45 before phase 5. In short:
 - `unread_since_event_id` already reads `item_reads`; phase 5 adds the upsert (`POST /items/{key}/read`).
 - `GET /items/similar` must be declared before `/items/{key}`.
 
-**Phase 6**
-- Handlers consume `item.event` rows with `payload.event_ids` (a list of one). The cleanup job deletes idempotency keys older than 24 h (KNOWN_LIMITATIONS).
+**Phase 6 (left over)**
+- The cleanup job (idempotency keys > 24 h, expired sessions, `done` outbox rows > 7 days) and `FAULT_NOTIFY_FAIL_RATE` were skipped on purpose.
+- Phase 7 listens on `LISTEN notifications` (payload `{user_id}`) and `item_changes`; `notify_user` and `record_event` already send them.
 
 **Phase 8-10**
 - Generated client: operation ids are stable function names. The client sends an `Idempotency-Key` with every mutation and a **new key for every changed request** (rebases included; decision 34).
@@ -112,4 +115,4 @@ Read `docs/ENGINEERING_DECISIONS.md` 35-45 before phase 5. In short:
 
 ## Next phase
 
-Phase 6: the async worker (SPEC 9). It must create the `notifications` rows (fan-out, skip the actor, `ON CONFLICT DO NOTHING` on `(user_id, event_id)`) and call `NOTIFY notifications`; `GET /me/notifications` already reads them through `visibility_clause()`. Consider a `(user_id, id DESC)` index for the full list (KNOWN_LIMITATIONS).
+Phase 7: live updates (SPEC 10): `GET /stream` (SSE) fed by `LISTEN item_changes` and `LISTEN notifications`, filtered with the visibility rule per client. Consider a `(user_id, id DESC)` index for the full notification list (KNOWN_LIMITATIONS).

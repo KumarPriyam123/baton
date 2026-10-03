@@ -449,3 +449,31 @@ Decided with the phase 5 prompt; none of them changes a SPEC rule, each fills a 
 - **Notifications** list newest first by id; `unread=true` uses the partial index. SPEC lists no index for
   the full list, so it reads one user's rows (KNOWN_LIMITATIONS). Marking read touches only the caller's
   rows, so another person's id in the request is ignored. The worker that creates them is phase 6.
+
+## 47. Phase 6 (lean): how the worker reads SPEC 9
+
+- **`item.created` is enqueued by `create_item`,** in the command's transaction, with dedupe key
+  `dup:<item_id>` (`db/tx.py: enqueue`). SPEC 9 lists the job but nothing wrote it; `record_event` only
+  writes `item.event`. The outbox is still written only from `db/tx.py` and `repo/outbox.py` (the
+  single-writer test lists both).
+- **Claim and finish.** The SPEC claim query, with `now` passed in (never `now()` in SQL, so tests move the
+  clock). Complete and fail are guarded by `status = 'pending'`: a runner that lost its lease and finishes
+  late cannot undo a job another runner completed. A claim counts as a try, so a job whose runner died
+  already has the lost try in `attempts`; the 8th try that fails (or is lost) makes it `dead`.
+- **A hung handler is cut off at the lease** (`asyncio.timeout(lease)`) and counts as a failed try, so one
+  poison job cannot block a runner. Cancellation (a killed process) is not a failure: the lease stays and
+  another runner takes the job over after it expires. SIGTERM finishes the job in hand and releases the
+  unstarted rest of the batch (their try is given back).
+- **Notify checks visibility per recipient with `can_view`** (the policy's own function), judged against the
+  item as it is when the job runs. Candidates are requester, assignee and watchers, minus the actor and
+  deactivated users. It writes `NOTIFY notifications {user_id}` for each new row (phase 7 listens).
+- **`duplicate_suggested` carries `{count, top_score}`, not the other items' keys:** the timeline is shown to
+  everyone who can see this item, and they may not be allowed to see the others. The ids are in
+  `item_similar`, which is filtered by whoever reads it. Written once per item (checked, since the dedupe
+  key only guards the enqueue).
+- **The SLA sweep** stamps `sla_breached_at` in `repo/items.py` (I1) 100 items per transaction under
+  `pg_try_advisory_xact_lock`, and writes each `sla_breached` event through `record_event`, so the normal
+  notify path fans it out. Each worker runs the sweep every 60 s; the lock and the `IS NULL` guard make
+  that safe. The cleanup job and `FAULT_NOTIFY_FAIL_RATE` are skipped (phase 6 lean).
+- **Admin.** `GET /admin/jobs?status=&cursor=&limit=` (keyset by id) and `POST /admin/jobs/{id}/retry`
+  (dead only; 409 otherwise, 404 if missing), admins only.

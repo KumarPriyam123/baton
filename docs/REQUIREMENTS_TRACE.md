@@ -128,8 +128,8 @@ Real stack through nginx on port 8081 (migration head 0004): claim, a losing cla
 
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
 |---|---|---|---|---|---|
-| B1 | Secondary work (notifications, processing, enrichment) may be async | outbox worker: notifications, duplicate detection, SLA sweep, cleanup | 6 | worker tests | ☐ |
-| B2 | Consider failure, running more than once, delay | retries with backoff, dead letters + retry UI, idempotent handlers, leases, advisory locks; UI never depends on async | 6, 11, 13 | T-OUTBOX; failure drills | ☐ |
+| B1 | Secondary work (notifications, processing, enrichment) may be async | outbox worker: notifications, duplicate detection, SLA sweep, cleanup | 6 | worker tests | ◐ phase 6 (lean): notify, duplicates, SLA sweep, `test_worker.py`; cleanup not built |
+| B2 | Consider failure, running more than once, delay | retries with backoff, dead letters + retry UI, idempotent handlers, leases, advisory locks; UI never depends on async | 6, 11, 13 | T-OUTBOX; failure drills | ◐ phase 6: backoff, dead after 8, `/admin/jobs` + retry, lease takeover tested; UI in phase 11 |
 
 ## Expected scale
 
@@ -165,7 +165,7 @@ Real stack through nginx on port 8081 (migration head 0004): claim, a losing cla
 | CB4 | Enforcing workflow rules | workflow module + DB constraints | T-FLOW | ◐ phase 4 proven (T-FLOW, `APPROVAL_REQUIRED`); demo in 10 |
 | CB5 | (beyond the examples) approvals bound to content | subject hash + invalidation | T-APPROVE-RACE | ◐ phase 4 proven (T-APPROVE-RACE, 50 rounds); demo in 10 |
 | CB6 | Authorization at the resource level | confidential, requester, four-eyes, 404 | T-VIS | ◐ phases 2 and 3: SQL and Python agree (T-VIS); list, facets and events checked over HTTP; search, attention and notifications in phase 5 |
-| CB7 | Reliable asynchronous processing | outbox + SKIP LOCKED + idempotent handlers | T-OUTBOX | ☐ |
+| CB7 | Reliable asynchronous processing | outbox + SKIP LOCKED + idempotent handlers | T-OUTBOX | ◐ phase 6: `test_worker.py::test_two_runners_against_500_jobs_do_each_side_effect_exactly_once` |
 | CB8 | Reconciling optimistic frontend state with server decisions | version merge, scopes, rebase, rollback | T-RECONCILE + E2E | ☐ |
 | CB-P | Be prepared to explain them | DEMO_SCRIPT.md | rehearsal done | ☐ |
 
