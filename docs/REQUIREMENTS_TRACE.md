@@ -33,7 +33,7 @@ Status: ☐ not started · ◐ built, proof pending · ☑ proven
 | A confidential Compliance item is 404 to a non-lead member and in no list | ◐ policy and SQL level proven; HTTP level in phase 3 | `can()` returns `NOT_FOUND` and the clause excludes the item for farah (5+ hidden items, in lists and counts). There is no item endpoint yet; the HTTP-level test is a phase 3 Done-when. |
 | The CSRF test covers every unsafe route in OpenAPI | ☑ | `tests/integration/test_csrf.py` reads `/api/openapi.json`; a route added inside the test is protected without touching the middleware. Hand sabotage (check returns True): 6 tests red. |
 
-Also proven: sessions (hash only stored, idle expiry, deactivation and role changes apply at once, logout kills the token), throttling (6th attempt 429, same answer for unknown email), every SPEC 12 code, membership rules, `/readyz`. CI: https://github.com/KumarPriyam123/baton/actions/runs/37130018097 (2,853 API + 4 web tests).
+Also proven: sessions (hash only stored, idle expiry, deactivation and role changes apply at once, logout kills the token), throttling (6th attempt 429, same answer for unknown email), every SPEC 12 code, membership rules, `/readyz`. CI: https://github.com/KumarPriyam123/baton/actions/runs/37130453803 (2,854 API + 4 web tests).
 
 ## The situation (pain points the product must fix)
 

@@ -91,4 +91,4 @@ committed demo seed (`tests/support/seeded.py`), so sessions, cookies and SQL ar
 Time-dependent behaviour uses `time-machine`; every timestamp that matters is passed in from
 Python (never `now()` in SQL) so the tests can move the clock.
 
-Whole suite at the end of phase 2: 2,853 API tests, about 70 s.
+Whole suite at the end of phase 2: 2,854 API tests, about 70 s.

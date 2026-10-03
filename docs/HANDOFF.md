@@ -15,7 +15,7 @@ What exists, on top of phases 0 and 1 (stack, schema, seed):
 - **Authorization** (`app/domain/policy.py`, pure): `can()` covers every row of SPEC 5.2, `can_view()` and `visibility_clause()` are the two forms of SPEC 5.1. Invisible item gives code `NOT_FOUND`; visible but forbidden gives `FORBIDDEN` plus a reason.
 - **Auth** (`app/auth`, `app/services/auth.py`, `app/api/csrf.py`): argon2id, Postgres sessions (hash only, 12 h idle expiry), login throttling (5 failures, 15 min), CSRF double-submit on every unsafe method, `POST /auth/login`, `POST /auth/logout`, `GET /me`, `GET /demo/users` (demo mode only).
 - **Teams and people:** `GET /teams`, `GET /teams/{key}/members`, `POST|PATCH|DELETE /teams/{key}/members[/{user_id}]`, `GET /users?q=`.
-- **Tests:** 2,853 API (unit, db, integration) and 4 web; all need real Postgres and none skip. `tests/support/` has scratch databases, a seeded-database helper and a "run the real app" helper.
+- **Tests:** 2,854 API (unit, db, integration) and 4 web; all need real Postgres and none skip. `tests/support/` has scratch databases, a seeded-database helper and a "run the real app" helper.
 
 Verified in this phase: every Done-when item at policy and SQL level (see `docs/REQUIREMENTS_TRACE.md`), CI green, the whole auth flow through nginx with curl.
 **Still deferred:** `docker compose up` on port 8080 itself (another local project holds it); re-check at the phase 14 clean-clone run.

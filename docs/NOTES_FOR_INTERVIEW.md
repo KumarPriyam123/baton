@@ -203,4 +203,4 @@ Each entry: **problem → root cause → fix → lesson**.
 7. **Roles are never in the cookie.** `load_actor_context` (`api/app/repo/users.py:15`) reads `memberships` on every request; the session stores only `sha256(token)` (`api/app/auth/sessions.py:33`). Removing a membership applies to the person's very next request (tested).
 8. **CSRF by method, not by route list.** `CsrfMiddleware` (`api/app/api/csrf.py:31`) guards POST, PUT, PATCH and DELETE except login, and runs before authentication (`api/app/main.py:40`). The test reads OpenAPI, so later routes are covered automatically.
 9. **Honest gaps.** The login lock reveals which emails exist; sessions have no absolute lifetime; membership removal is refused (not auto-unassigned) while the person owns open items until phase 4 (decision 14); the membership and login commands do not yet use `command_tx` (phase 3).
-10. **Numbers.** 2,853 API + 4 web tests, none skipped, about 70 s. The auth flow was also checked end to end through nginx.
+10. **Numbers.** 2,854 API + 4 web tests, none skipped, about 70 s. The auth flow was also checked end to end through nginx.
