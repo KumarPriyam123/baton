@@ -1,4 +1,6 @@
-"""Sign in and sign out. One short transaction per command (CLAUDE.md I5)."""
+"""Sign in. The password is checked (slow, CPU) before the command transaction starts; the
+writes (failure count, or session) then run in one short command transaction (CLAUDE.md I5).
+"""
 
 import math
 from dataclasses import dataclass
@@ -7,6 +9,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.auth import passwords, sessions
+from app.db.tx import CommandTx, run_command
 from app.domain.errors import RateLimited, Unauthenticated
 from app.repo import users as users_repo
 
@@ -55,18 +58,25 @@ async def login(
     matches = await passwords.averify(user.password_hash, password)
     if not matches or user.deactivated_at is not None:
         if user.deactivated_at is None:
-            await users_repo.register_failed_login(
-                conn,
-                user.id,
-                now=now,
-                max_failures=MAX_FAILED_LOGINS,
-                lock_until=now + LOCK_DURATION,
-            )
-            await conn.commit()
+
+            async def count_failure(tx: CommandTx) -> None:
+                await users_repo.register_failed_login(
+                    tx.conn,
+                    user.id,
+                    now=now,
+                    max_failures=MAX_FAILED_LOGINS,
+                    lock_until=now + LOCK_DURATION,
+                )
+
+            # Committed first, then refused: raising inside the transaction would undo the count.
+            await run_command(conn, count_failure, now=now)
         raise Unauthenticated(INVALID_CREDENTIALS)
 
     token = sessions.new_token()
-    await users_repo.clear_failed_logins(conn, user.id)
-    await sessions.create_session(conn, token, user.id, user_agent, now, session_ttl)
-    await conn.commit()
+
+    async def start_session(tx: CommandTx) -> None:
+        await users_repo.clear_failed_logins(tx.conn, user.id)
+        await sessions.create_session(tx.conn, token, user.id, user_agent, now, session_ttl)
+
+    await run_command(conn, start_session, actor_id=user.id, now=now)
     return LoginResult(token, sessions.new_csrf_token(), str(user.id))

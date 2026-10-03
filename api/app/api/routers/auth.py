@@ -8,6 +8,7 @@ from app.api.deps import AppSettings, Conn, utcnow
 from app.api.routers.me import build_me
 from app.api.schemas.auth import LoginRequest, MeOut
 from app.auth import sessions
+from app.db.tx import CommandTx, run_command
 from app.services import auth as auth_service
 
 router = APIRouter(prefix=f"{API_PREFIX}/auth", tags=["auth"])
@@ -37,7 +38,11 @@ async def logout(request: Request, conn: Conn) -> Response:
     Signing out when already signed out is not an error."""
     token = request.cookies.get(sessions.SESSION_COOKIE)
     if token:
-        await sessions.delete_session(conn, token)
+
+        async def end_session(tx: CommandTx) -> None:
+            await sessions.delete_session(tx.conn, token)
+
+        await run_command(conn, end_session)
     response = Response(status_code=204)
     clear_cookies(response)
     return response

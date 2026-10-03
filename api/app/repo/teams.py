@@ -4,6 +4,7 @@ import uuid
 from dataclasses import dataclass
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.db import schema
@@ -67,21 +68,29 @@ async def list_members(
 
 
 async def get_role(
-    conn: AsyncConnection, team_id: uuid.UUID, user_id: uuid.UUID
+    conn: AsyncConnection, team_id: uuid.UUID, user_id: uuid.UUID, *, for_update: bool = False
 ) -> TeamRole | None:
+    """`for_update=True` locks the row, for a command that is about to change or delete it."""
     m = schema.memberships.c
-    role = (
-        await conn.execute(sa.select(m.role).where(m.team_id == team_id, m.user_id == user_id))
-    ).scalar_one_or_none()
+    query = sa.select(m.role).where(m.team_id == team_id, m.user_id == user_id)
+    if for_update:
+        query = query.with_for_update()
+    role = (await conn.execute(query)).scalar_one_or_none()
     return TeamRole(role) if role is not None else None
 
 
 async def insert_membership(
     conn: AsyncConnection, team_id: uuid.UUID, user_id: uuid.UUID, role: TeamRole
-) -> None:
-    await conn.execute(
-        sa.insert(schema.memberships).values(team_id=team_id, user_id=user_id, role=role.value)
+) -> bool:
+    """False when the person was already in the team (two adds at once: the second changes
+    nothing). The caller then reads the role that won."""
+    inserted = await conn.execute(
+        pg_insert(schema.memberships)
+        .values(team_id=team_id, user_id=user_id, role=role.value)
+        .on_conflict_do_nothing(index_elements=["team_id", "user_id"])
+        .returning(schema.memberships.c.user_id)
     )
+    return inserted.first() is not None
 
 
 async def update_role(

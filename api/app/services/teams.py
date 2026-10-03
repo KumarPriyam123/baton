@@ -1,4 +1,5 @@
-"""Membership commands. Each one checks the policy, then applies the change in one transaction.
+"""Membership commands. Each one checks the policy, then applies the change in one command
+transaction (CLAUDE.md I5): the membership row is read with a lock and changed before commit.
 
 SPEC 5.2: leads manage members and viewers; only admins touch leads (adding, removing, promoting
 to lead, or demoting from lead).
@@ -14,6 +15,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.db.tx import CommandTx, run_command
 from app.domain.enums import TeamRole
 from app.domain.errors import Forbidden, WorkflowViolation
 from app.domain.policy import Action, ActorContext, TeamFacts, can
@@ -47,6 +49,12 @@ async def _refuse_if_owns_open_items(
         )
 
 
+def _already_in(team: teams_repo.TeamRecord, current: TeamRole) -> WorkflowViolation:
+    return WorkflowViolation(
+        f"They are already in {team.name} as {current.value}. Change the role instead."
+    )
+
+
 async def add_member(
     conn: AsyncConnection,
     ctx: ActorContext,
@@ -55,16 +63,19 @@ async def add_member(
     role: TeamRole,
 ) -> Outcome:
     _require(ctx, team, role)
-    current = await teams_repo.get_role(conn, team.id, user_id)
-    if current == role:
-        return Outcome(role, changed=False)  # adding someone who is already there is a no-op
-    if current is not None:
-        raise WorkflowViolation(
-            f"They are already in {team.name} as {current.value}. Change the role instead."
-        )
-    await teams_repo.insert_membership(conn, team.id, user_id, role)
-    await conn.commit()
-    return Outcome(role, changed=True)
+
+    async def work(tx: CommandTx) -> Outcome:
+        if await teams_repo.insert_membership(tx.conn, team.id, user_id, role):
+            return Outcome(role, changed=True)
+        # Already there, or added by someone else a moment ago: the role that won decides.
+        current = await teams_repo.get_role(tx.conn, team.id, user_id)
+        if current == role:
+            return Outcome(role, changed=False)  # adding someone who is already there is a no-op
+        if current is None:  # removed again in between; the caller can simply retry
+            raise WorkflowViolation("That membership just changed. Try again.")
+        raise _already_in(team, current)
+
+    return await run_command(conn, work, actor_id=ctx.user_id)
 
 
 async def change_role(
@@ -75,28 +86,34 @@ async def change_role(
     new_role: TeamRole,
 ) -> Outcome | None:
     """None when the person is not in the team."""
-    current = await teams_repo.get_role(conn, team.id, user_id)
-    if current is None:
-        return None
-    _require(ctx, team, current, new_role)
-    if current == new_role:
-        return Outcome(new_role, changed=False)
-    if new_role == TeamRole.VIEWER:  # a viewer cannot own items
-        await _refuse_if_owns_open_items(conn, team, user_id, "make them a viewer")
-    await teams_repo.update_role(conn, team.id, user_id, new_role)
-    await conn.commit()
-    return Outcome(new_role, changed=True)
+
+    async def work(tx: CommandTx) -> Outcome | None:
+        current = await teams_repo.get_role(tx.conn, team.id, user_id, for_update=True)
+        if current is None:
+            return None
+        _require(ctx, team, current, new_role)
+        if current == new_role:
+            return Outcome(new_role, changed=False)
+        if new_role == TeamRole.VIEWER:  # a viewer cannot own items
+            await _refuse_if_owns_open_items(tx.conn, team, user_id, "make them a viewer")
+        await teams_repo.update_role(tx.conn, team.id, user_id, new_role)
+        return Outcome(new_role, changed=True)
+
+    return await run_command(conn, work, actor_id=ctx.user_id)
 
 
 async def remove_member(
     conn: AsyncConnection, ctx: ActorContext, team: teams_repo.TeamRecord, user_id: uuid.UUID
 ) -> bool:
     """False when the person is not in the team."""
-    current = await teams_repo.get_role(conn, team.id, user_id)
-    if current is None:
-        return False
-    _require(ctx, team, current)
-    await _refuse_if_owns_open_items(conn, team, user_id, "remove them")
-    await teams_repo.delete_membership(conn, team.id, user_id)
-    await conn.commit()
-    return True
+
+    async def work(tx: CommandTx) -> bool:
+        current = await teams_repo.get_role(tx.conn, team.id, user_id, for_update=True)
+        if current is None:
+            return False
+        _require(ctx, team, current)
+        await _refuse_if_owns_open_items(tx.conn, team, user_id, "remove them")
+        await teams_repo.delete_membership(tx.conn, team.id, user_id)
+        return True
+
+    return await run_command(conn, work, actor_id=ctx.user_id)

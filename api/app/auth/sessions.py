@@ -99,5 +99,5 @@ async def authenticate(
 
 
 async def delete_session(conn: AsyncConnection, token: str) -> None:
+    """Part of the caller's command transaction (logout)."""
     await conn.execute(sa.delete(schema.sessions).where(schema.sessions.c.id == token_hash(token)))
-    await conn.commit()
