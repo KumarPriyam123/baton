@@ -1,0 +1,118 @@
+"""Seeded histories are valid for many seeds, and the verifier really catches broken ones."""
+
+import copy
+from datetime import UTC, datetime
+from typing import Any
+
+import pytest
+
+from app.domain.enums import Resolution
+from scripts.seedlib import generate as g
+from scripts.seedlib.verify import check_item
+
+from .seed_fixtures import LEAD_A, MEMBER_A, REQUESTER, at, make_item
+from .seed_records import records_from_dataset, records_from_sim
+
+NOW = datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
+
+
+def build(seed: int) -> g.Dataset:
+    return g.build_dataset("demo", seed=seed, now=NOW, password_hash="x")
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3, 7, 42, 2026])
+def test_every_item_of_a_demo_seed_replays_to_its_stored_state(seed: int) -> None:
+    items, events, approvals = records_from_dataset(build(seed))
+
+    problems = [p for i in items for p in check_item(items[i], events[i], approvals[i])]
+
+    assert problems == []
+    assert len(items) == 600
+
+
+def test_the_same_seed_and_time_give_identical_data() -> None:
+    first, second = build(5), build(5)
+
+    assert first.items == second.items
+    assert first.events == second.events
+    assert first.counts() == second.counts()
+
+
+def test_a_different_seed_gives_different_data() -> None:
+    assert build(5).items != build(6).items
+
+
+# ----- the verifier itself: each kind of corruption must be reported ------------------------
+
+
+def valid_history() -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    item = make_item(requires_approval=True)
+    item.claim(at(5), MEMBER_A)
+    item.request_approval(at(6), MEMBER_A, "please")
+    item.decide(at(7), LEAD_A, approve=True, note="ok")
+    item.resolve(at(8), MEMBER_A, "Fixed.")
+    item.close(at(9), LEAD_A, resolution=Resolution.DONE, reason="Confirmed.")
+    assert item.requester == REQUESTER
+    return records_from_sim(item)
+
+
+def test_the_baseline_history_is_valid() -> None:
+    item, events, approvals = valid_history()
+
+    assert check_item(item, events, approvals) == []
+
+
+def corrupt(change: str) -> list[str]:
+    item, events, approvals = copy.deepcopy(valid_history())
+    if change == "missing_event":
+        del events[2]
+    elif change == "version_gap":
+        for event in events[3:]:
+            event["item_version"] += 1
+    elif change == "stored_status":
+        item["status"] = "in_progress"
+    elif change == "stored_version":
+        item["version"] += 1
+    elif change == "decision_without_reason":
+        next(e for e in events if e["kind"] == "approval_approved")["reason"] = " "
+    elif change == "decision_flag_missing":
+        next(e for e in events if e["kind"] == "closed")["is_decision"] = False
+    elif change == "approval_removed":
+        # resolved needs an approval whose approving event is gone
+        events[:] = [e for e in events if e["kind"] != "approval_approved"]
+        for n, event in enumerate(events):
+            event["item_version"] = 1 + max(0, n - 1)
+    elif change == "wrong_team_stamp":
+        events[1]["team_id"] = REQUESTER
+    elif change == "system_event_with_actor":
+        events.append({**events[-1], "kind": "sla_breached", "id": 99, "actor_id": REQUESTER})
+    elif change == "approval_status":
+        approvals[0]["status"] = "pending"
+    else:
+        raise AssertionError(change)
+    return check_item(item, events, approvals)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "missing_event",
+        "version_gap",
+        "stored_status",
+        "stored_version",
+        "decision_without_reason",
+        "decision_flag_missing",
+        "approval_removed",
+        "wrong_team_stamp",
+        "system_event_with_actor",
+        "approval_status",
+    ],
+)
+def test_verifier_reports_corruption(change: str) -> None:
+    assert corrupt(change), f"verifier accepted a history with: {change}"
+
+
+def test_verifier_flags_an_item_without_events() -> None:
+    item, _, _ = valid_history()
+
+    assert check_item(item, [], []) == [f"{item['key']}: has no events"]
