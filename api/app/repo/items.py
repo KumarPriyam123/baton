@@ -14,7 +14,7 @@ import base64
 import binascii
 import json
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -22,7 +22,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
-from sqlalchemy.sql import Select
+from sqlalchemy.sql import Select, Subquery
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.db import schema
@@ -109,7 +109,19 @@ def _live_approval(item_id: ColumnElement[Any]) -> ColumnElement[bool]:
     )
 
 
-def _item_query(viewer_id: uuid.UUID) -> Select[Any]:
+# Every column of work_items except the generated tsvector, which no item view needs.
+_COLUMNS = [c for c in schema.work_items.columns if c.name != "search"]
+
+
+def _page(*where: ColumnElement[bool]) -> Select[Any]:
+    """The rows of work_items that match, before any join: filter, order and LIMIT go here so
+    that the joins below only ever run for the rows of one page, not for the whole table."""
+    return sa.select(*_COLUMNS).where(*where)
+
+
+def _item_query(viewer_id: uuid.UUID, page: Subquery) -> Select[Any]:
+    """The item view over `page`, a subquery of `_page()` that already has its LIMIT."""
+    b = page.c
     t = schema.teams.c
     requester = schema.users.alias("requester")
     assignee = schema.users.alias("assignee")
@@ -130,7 +142,7 @@ def _item_query(viewer_id: uuid.UUID) -> Select[Any]:
             ap_t.decided_by,
             ap_t.decided_at,
         )
-        .where(ap_t.item_id == wi.id)
+        .where(ap_t.item_id == b.id)
         .order_by(ap_t.requested_at.desc())
         .limit(1)
         .lateral("approval")
@@ -138,7 +150,7 @@ def _item_query(viewer_id: uuid.UUID) -> Select[Any]:
     blocked_reason = (
         sa.select(schema.item_events.c.reason)
         .where(
-            schema.item_events.c.item_id == wi.id,
+            schema.item_events.c.item_id == b.id,
             schema.item_events.c.kind == "blocked",
         )
         .order_by(schema.item_events.c.id.desc())
@@ -146,47 +158,47 @@ def _item_query(viewer_id: uuid.UUID) -> Select[Any]:
         .scalar_subquery()
     )
     source = (
-        schema.work_items.join(schema.teams, t.id == wi.team_id)
-        .join(requester, requester.c.id == wi.requester_id)
-        .outerjoin(assignee, assignee.c.id == wi.assignee_id)
-        .outerjoin(duplicate, duplicate.c.id == wi.duplicate_of_id)
-        .outerjoin(ev, ev.c.id == wi.last_event_id)
+        page.join(schema.teams, t.id == b.team_id)
+        .join(requester, requester.c.id == b.requester_id)
+        .outerjoin(assignee, assignee.c.id == b.assignee_id)
+        .outerjoin(duplicate, duplicate.c.id == b.duplicate_of_id)
+        .outerjoin(ev, ev.c.id == b.last_event_id)
         .outerjoin(ev_actor, ev_actor.c.id == ev.c.actor_id)
-        .outerjoin(reads, sa.and_(reads.c.item_id == wi.id, reads.c.user_id == viewer_id))
+        .outerjoin(reads, sa.and_(reads.c.item_id == b.id, reads.c.user_id == viewer_id))
         .outerjoin(latest_approval, sa.true())
         .outerjoin(ap_requester, ap_requester.c.id == latest_approval.c.requested_by)
         .outerjoin(ap_decider, ap_decider.c.id == latest_approval.c.decided_by)
     )
     return sa.select(
-        wi.id,
-        wi.key,
-        wi.version,
-        wi.last_event_id,
-        wi.team_id,
+        b.id,
+        b.key,
+        b.version,
+        b.last_event_id,
+        b.team_id,
         t.key.label("team_key"),
         t.name.label("team_name"),
-        wi.type,
-        wi.title,
-        wi.description,
-        wi.priority,
-        wi.status,
-        wi.resolution,
-        wi.resolution_note,
+        b.type,
+        b.title,
+        b.description,
+        b.priority,
+        b.status,
+        b.resolution,
+        b.resolution_note,
         duplicate.c.key.label("duplicate_of"),
-        wi.confidential,
-        wi.requires_approval,
-        wi.requester_id,
+        b.confidential,
+        b.requires_approval,
+        b.requester_id,
         requester.c.name.label("requester_name"),
-        wi.assignee_id,
+        b.assignee_id,
         assignee.c.name.label("assignee_name"),
-        wi.due_at,
-        wi.due_source,
-        wi.sla_breached_at,
-        wi.last_activity_at,
-        wi.created_at,
-        wi.updated_at,
-        wi.resolved_at,
-        wi.closed_at,
+        b.due_at,
+        b.due_source,
+        b.sla_breached_at,
+        b.last_activity_at,
+        b.created_at,
+        b.updated_at,
+        b.resolved_at,
+        b.closed_at,
         latest_approval.c.id.label("approval_id"),
         latest_approval.c.status.label("approval_status"),
         latest_approval.c.requested_by.label("approval_requested_by_id"),
@@ -203,16 +215,16 @@ def _item_query(viewer_id: uuid.UUID) -> Select[Any]:
             (
                 sa.and_(
                     reads.c.last_read_event_id.is_not(None),
-                    wi.last_event_id > reads.c.last_read_event_id,
+                    b.last_event_id > reads.c.last_read_event_id,
                 ),
                 reads.c.last_read_event_id,
             ),
             else_=None,
         ).label("unread_since_event_id"),
-        sa.case((wi.status == ItemStatus.BLOCKED.value, blocked_reason), else_=None).label(
+        sa.case((b.status == ItemStatus.BLOCKED.value, blocked_reason), else_=None).label(
             "blocked_reason"
         ),
-        _live_approval(wi.id).label("has_live_approval"),
+        _live_approval(b.id).label("has_live_approval"),
     ).select_from(source)
 
 
@@ -220,7 +232,8 @@ async def get_visible_by_key(
     conn: AsyncConnection, ctx: ActorContext, key: str
 ) -> ItemRecord | None:
     """The item the actor may see, or None (missing and hidden look the same, SPEC 5.1)."""
-    query = _item_query(ctx.user_id).where(wi.key == key, visibility_clause(ctx))
+    page = _page(wi.key == key, visibility_clause(ctx)).subquery("page")
+    query = _item_query(ctx.user_id, page)
     row = (await conn.execute(query)).first()
     return ItemRecord.from_row(row) if row else None
 
@@ -443,20 +456,24 @@ def filter_clauses(
 
 
 _INFINITY = sa.literal_column("'infinity'::timestamptz", type_=sa.DateTime(timezone=True))
-_DUE = sa.func.coalesce(wi.due_at, _INFINITY)  # null due dates sort last, in ORDER BY and cursor
+
+
+def _due(columns: Any) -> ColumnElement[Any]:
+    """Null due dates sort last, in ORDER BY and in the cursor alike."""
+    return sa.func.coalesce(columns.due_at, _INFINITY)
 
 
 @dataclass(frozen=True)
 class Sort:
-    keys: tuple[ColumnElement[Any], ...]
+    keys: Callable[[Any], tuple[ColumnElement[Any], ...]]  # columns of work_items or of a page
     descending: bool
 
 
 SORTS: dict[str, Sort] = {
-    "priority": Sort((wi.priority, _DUE, wi.id), descending=False),
-    "due": Sort((_DUE, wi.id), descending=False),
-    "updated": Sort((wi.updated_at, wi.id), descending=True),
-    "created": Sort((wi.created_at, wi.id), descending=True),
+    "priority": Sort(lambda c: (c.priority, _due(c), c.id), descending=False),
+    "due": Sort(lambda c: (_due(c), c.id), descending=False),
+    "updated": Sort(lambda c: (c.updated_at, c.id), descending=True),
+    "created": Sort(lambda c: (c.created_at, c.id), descending=True),
 }
 
 
@@ -540,15 +557,18 @@ async def list_items(
     the last key, so ties can never skip or repeat a row.
     """
     spec = SORTS[sort]
-    query = _item_query(ctx.user_id).where(*filter_clauses(ctx, filters, now))
+    inner = _page(*filter_clauses(ctx, filters, now))
     if cursor is not None:
-        after = _after(sort, cursor)
-        keys = sa.tuple_(*spec.keys)
-        query = query.where(
-            keys < sa.tuple_(*after) if spec.descending else keys > sa.tuple_(*after)
-        )
-    order = [k.desc() if spec.descending else k.asc() for k in spec.keys]
-    rows = (await conn.execute(query.order_by(*order).limit(limit + 1))).all()
+        after = sa.tuple_(*_after(sort, cursor))
+        keys = sa.tuple_(*spec.keys(wi))
+        inner = inner.where(keys < after if spec.descending else keys > after)
+
+    def ordered(columns: Any) -> list[Any]:
+        return [k.desc() if spec.descending else k.asc() for k in spec.keys(columns)]
+
+    window = inner.order_by(*ordered(wi)).limit(limit + 1).subquery("page")
+    query = _item_query(ctx.user_id, window).order_by(*ordered(window.c))
+    rows = (await conn.execute(query)).all()
     records = [ItemRecord.from_row(r) for r in rows]
     page = records[:limit]
     more = len(records) > limit
