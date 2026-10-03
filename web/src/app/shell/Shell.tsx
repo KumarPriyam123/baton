@@ -66,6 +66,7 @@ export function Shell({ children }: { children?: ReactNode }) {
       <NewRequestDialog open={creating} onOpenChange={setCreating} />
       {/* Announces live changes to screen readers (DESIGN §7). Toasts have their own region. */}
       <div aria-live="polite" role="status" className="sr-only-live" id="live-region" />
+      <div aria-live="assertive" role="alert" className="sr-only-live" id="live-region-assertive" />
     </Ctx.Provider>
   );
 }

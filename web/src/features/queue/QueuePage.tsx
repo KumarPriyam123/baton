@@ -22,8 +22,8 @@ import {
 } from "../../lib/filters";
 import type { ItemOut } from "../../lib/api";
 import { useNow } from "../../lib/useNow";
+import { ItemDetail } from "../item/ItemDetail";
 import { AssignToMe } from "./AssignToMe";
-import { DetailPane } from "./DetailPane";
 import { FilterBar } from "./FilterBar";
 import { usePrefetchItem } from "./prefetch";
 
@@ -67,7 +67,7 @@ export function QueuePage() {
           key ? "fixed inset-y-0 right-0 z-30 block w-[560px] max-w-full shadow-float" : "hidden",
         )}
       >
-        <DetailPane
+        <ItemDetail
           itemKey={key?.toUpperCase()}
           onClose={() => void navigate(`/items${location.search}`)}
         />
