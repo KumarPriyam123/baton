@@ -279,3 +279,58 @@ Not changed:
 - **The actor context is loaded before the command transaction** (SPEC 6.4 draws it inside). A role
   change landing while a command waits up to 2 s for a lock is not seen by that command. Recorded in
   KNOWN_LIMITATIONS; SPEC 5.3 (fresh on every request) holds.
+
+## 35. Phase 4: order of checks in a command, and the approval-request race
+
+Every command judges in this order: not visible (404) → policy (403) → **a pending approval, for
+`request_approval` only** (409 `APPROVAL_ALREADY_PENDING`) → `If-Match` (412) → workflow (409/422).
+SPEC 6.2 requires `If-Match` on `request_approval`, and the plan's test wants the loser of two
+concurrent requests to get 409. Both carry the same version, so after the winner commits the loser's
+version is stale; putting the pending check before the version check is the only way to keep both
+statements true. A stale `If-Match` with no pending approval is still 412. Decided with Kumar.
+
+## 36. Phase 4: decision events always carry a reason
+
+`approve` and `close` of a resolved item are ★ decisions, but SPEC 4.1 requires no reason for them,
+while SPEC 3.2 says decisions carry reasons and `verify_seed` rejects a decision without one. The
+note is optional in the API; when it is missing the event's reason is a fixed text ("Approved",
+"Closed after resolution"). The user's own words are never replaced. Rejection still requires a note.
+Decided with Kumar.
+
+## 37. Phase 4: a material edit or a transfer invalidates every live approval
+
+SPEC 4.4 says "the latest `approved`". The command invalidates **every** pending approval and every
+approved one whose `subject_hash` no longer matches the content (the same rule the seed simulator
+uses). With two approved rows an older one could otherwise match again after an edit-back, and
+T-APPROVE-RACE can assert "every approved row matches the current content". One
+`approval_invalidated` event names all of them (`approval_ids`) and the fields that changed.
+Decided with Kumar.
+
+## 38. Phase 4: `POST /transfer` answers with the item even if the actor can no longer see it
+
+A lead of the old team who transfers an item away is no longer allowed to see it (SPEC 4.3.4). The
+command returns 200 with the item as it is after the change, rendered for that actor with
+`allowed_actions` empty, because they just performed the action and learn nothing new. A later `GET`
+is a normal 404. The stored idempotent body is the same. Decided with Kumar.
+
+## 39. Phase 4: smaller readings of the SPEC
+
+- `assign` works from `new`, `in_progress` and `blocked`. SPEC 4.1 says "any open", but the note under
+  the table forbids it while `awaiting_approval`; the note is explicit, so it wins.
+- `unassign` is `POST /assign` with a null assignee (SPEC 11 has no unassign route). It needs `If-Match`
+  like `assign`; `release` (own) does not.
+- `resolve` takes `resolution` (default `done`); `reason` is the resolution note and the event reason.
+- `request_approval` is allowed whether or not `requires_approval` is on (SPEC 4.1 only asks for "no
+  pending approval"). `resolve` is what `requires_approval` gates.
+- `workflow.evaluate` judges state and payload only. Who may act stays in `policy.py` (I3, I4;
+  HANDOFF "policy.can() stays about people"). `allowed_actions` is `policy ∩ workflow`, and T-FLOW
+  tests the intersection.
+- Cancel and invalidate leave `approvals.decided_by` NULL: the four-eyes CHECK would reject a
+  requester cancelling their own request.
+- Claiming an item that is already mine answers 200 while it is open; on a resolved or closed item it
+  is `WORKFLOW_VIOLATION`.
+- **The claim UPDATE's guard is the only judge of claim state** (SPEC 6.1). Claim locks the row first
+  (I5) and checks policy, but does not pre-check `status`/`assignee` in Python; otherwise the check
+  after the lock would hide a missing `assignee_id IS NULL` and the sabotage row could not go red. The
+  same rule is data in `workflow.py` (for `allowed_actions` and T-FLOW) and a test ties the SQL guard
+  to it.
