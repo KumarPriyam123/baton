@@ -53,9 +53,14 @@ select = [
 ]
 ignore = ["S101"]  # assert is how pytest works; app code uses explicit errors
 
+[tool.ruff.lint.isort]
+# api/alembic/ is a migrations folder, not the alembic library
+known-third-party = ["alembic"]
+
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S105", "S106", "S311"]
 "scripts/**" = ["T201"]
+"alembic/**" = ["S608"]  # f-strings over fixed constants, no user input
 
 [tool.mypy]
 python_version = "3.12"
@@ -68,3 +73,7 @@ check_untyped_defs = true
 [[tool.mypy.overrides]]
 module = ["app.domain.*", "app.services.*"]
 strict = true
+
+[[tool.mypy.overrides]]
+module = ["asyncpg.*"]
+ignore_missing_imports = true
