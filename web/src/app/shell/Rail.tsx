@@ -1,5 +1,16 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronsUpDown, Inbox, ListChecks, Moon, Send, Sun, SunMoon, Users } from "lucide-react";
+import {
+  ChevronsUpDown,
+  Gavel,
+  Inbox,
+  LayoutDashboard,
+  ListChecks,
+  Moon,
+  Send,
+  Sun,
+  SunMoon,
+  Users,
+} from "lucide-react";
 import { useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router";
 import { toast } from "sonner";
@@ -17,6 +28,7 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "../../components/ui/Menu";
+import { NotificationBell } from "../../features/notifications/NotificationBell";
 import { api } from "../../lib/api";
 import { OPEN_STATUSES, type ListFilters, emptyFilters, serializeFilters } from "../../lib/filters";
 import { type Theme, applyTheme, getTheme } from "../../lib/theme";
@@ -118,7 +130,20 @@ export function Rail() {
         </div>
       )}
 
-      <div className="mt-auto pt-4">
+      <div className="mt-4 flex flex-col gap-1">
+        <h2 className="hidden px-2 pb-1 text-meta font-strong text-pencil lg:block">Overview</h2>
+        <NavLink to="/dashboard" className={linkClass} title="Dashboard">
+          <LayoutDashboard className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
+          <span className="hidden lg:inline">Dashboard</span>
+        </NavLink>
+        <NavLink to="/decisions" className={linkClass} title="Decisions">
+          <Gavel className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
+          <span className="hidden lg:inline">Decisions</span>
+        </NavLink>
+      </div>
+
+      <div className="mt-auto flex flex-col gap-1 pt-4">
+        <NotificationBell />
         <UserMenu />
       </div>
     </nav>

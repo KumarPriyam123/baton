@@ -2,6 +2,8 @@ import { Link, Navigate, Outlet, createBrowserRouter, useRouteError } from "reac
 
 import { RequireAuth, useUnauthenticatedRedirect } from "../features/auth/auth";
 import { LoginPage } from "../features/auth/LoginPage";
+import { DashboardPage } from "../features/dashboard/DashboardPage";
+import { DecisionsPage } from "../features/decisions/DecisionsPage";
 import { InboxPage } from "../features/inbox/InboxPage";
 import { QueuePage } from "../features/queue/QueuePage";
 import { EmptyState } from "../components/ui/States";
@@ -71,6 +73,8 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <Navigate to="/inbox" replace /> },
           { path: "inbox", element: <InboxPage />, errorElement: <RouteError /> },
+          { path: "dashboard", element: <DashboardPage />, errorElement: <RouteError /> },
+          { path: "decisions", element: <DecisionsPage />, errorElement: <RouteError /> },
           { path: "items/:key?", element: <QueuePage />, errorElement: <RouteError /> },
           { path: "*", element: <NotFound /> },
         ],
