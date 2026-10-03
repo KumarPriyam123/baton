@@ -269,6 +269,8 @@ stateDiagram-v2
 | confidential | lead | decision event |
 | requires_approval | turn on: assignee, lead · turn off: lead only, with reason | turning off is a decision event |
 
+`requires_approval` cannot be changed while the item is `awaiting_approval`; cancel the approval first.
+
 When priority changes and `due_source = auto`, `due_at` is recomputed from `created_at`. Defaults: P0 4 h · P1 24 h · P2 3 days · P3 7 days.
 
 ### 4.3 Transfer
