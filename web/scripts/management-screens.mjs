@@ -24,7 +24,10 @@ await page.waitForURL(/\/inbox/);
 
 await page.goto(`${base}/dashboard`);
 await page.getByRole("table").waitFor();
-await page.getByRole("button", { name: /oldest items and load per owner/ }).first().click();
+await page
+  .getByRole("button", { name: /oldest items and load per owner/ })
+  .first()
+  .click();
 await page.waitForTimeout(400);
 await page.screenshot({ path: `${out}/dashboard-${theme}.png` });
 
