@@ -1,55 +1,20 @@
 """The demo seed, loaded into a real database: idempotent, resettable, valid and demonstrable."""
 
-import asyncio
 import re
-import time
-import uuid
 from collections.abc import Iterator
-from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
 import pytest
-from alembic import command
 from argon2 import PasswordHasher
 
-from app.db.urls import asyncpg_dsn, with_database
+from app.db.urls import asyncpg_dsn
+from app.demo import DEMO_PASSWORD
 from scripts.seedlib import generate, load
-from scripts.seedlib.personas import DEMO_PASSWORD
 from scripts.seedlib.verify import verify_histories
-from tests.support.db import alembic_config
+from tests.support.seeded import SeededDatabase, build_demo_dataset, seeded_database
 
 LOAD_BUDGET_SECONDS = 30  # BUILD_PLAN phase 1: demo seed loads in under 30 s
-
-
-class SeededDatabase:
-    def __init__(self, url: str, dataset: generate.Dataset, seconds: float) -> None:
-        self.url = url
-        self.dataset = dataset
-        self.seconds = seconds
-
-    async def connect(self) -> asyncpg.Connection:
-        return await asyncpg.connect(asyncpg_dsn(self.url))
-
-
-async def _admin(test_url: str) -> asyncpg.Connection:
-    return await asyncpg.connect(asyncpg_dsn(with_database(test_url, "postgres")))
-
-
-async def _create(test_url: str, name: str) -> None:
-    admin = await _admin(test_url)
-    try:
-        await admin.execute(f'CREATE DATABASE "{name}"')
-    finally:
-        await admin.close()
-
-
-async def _drop(test_url: str, name: str) -> None:
-    admin = await _admin(test_url)
-    try:
-        await admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
-    finally:
-        await admin.close()
 
 
 async def _load(url: str, dataset: generate.Dataset, *, reset: bool = False) -> bool:
@@ -60,28 +25,10 @@ async def _load(url: str, dataset: generate.Dataset, *, reset: bool = False) -> 
         await conn.close()
 
 
-def _build() -> generate.Dataset:
-    return generate.build_dataset(
-        "demo",
-        seed=42,
-        now=datetime.now(UTC),
-        password_hash=PasswordHasher().hash(DEMO_PASSWORD),
-    )
-
-
 @pytest.fixture(scope="module")
 def seeded(test_database_url: str) -> Iterator[SeededDatabase]:
-    name = f"baton_seed_{uuid.uuid4().hex[:8]}"
-    asyncio.run(_create(test_database_url, name))
-    url = with_database(test_database_url, name)
-    try:
-        command.upgrade(alembic_config(url), "head")
-        started = time.perf_counter()
-        dataset = _build()
-        assert asyncio.run(_load(url, dataset)) is True
-        yield SeededDatabase(url, dataset, time.perf_counter() - started)
-    finally:
-        asyncio.run(_drop(test_database_url, name))
+    with seeded_database(test_database_url) as database:
+        yield database
 
 
 async def _rows(seeded: SeededDatabase, sql: str, *args: Any) -> list[asyncpg.Record]:
@@ -416,7 +363,7 @@ async def test_seeded_titles_are_realistic_and_keys_look_like_keys(seeded: Seede
 async def test_loading_again_without_reset_changes_nothing(seeded: SeededDatabase) -> None:
     before = await _value(seeded, "SELECT count(*) FROM item_events")
 
-    loaded = await _load(seeded.url, _build(), reset=False)
+    loaded = await _load(seeded.url, build_demo_dataset(), reset=False)
 
     assert loaded is False
     assert await _value(seeded, "SELECT count(*) FROM item_events") == before
@@ -431,7 +378,7 @@ async def test_reset_wipes_and_reloads_without_leaving_stragglers(
     finally:
         await conn.close()
 
-    assert await _load(seeded.url, _build(), reset=True) is True
+    assert await _load(seeded.url, build_demo_dataset(), reset=True) is True
 
     assert await _value(seeded, "SELECT count(*) FROM outbox") == 0
     assert await _value(seeded, "SELECT count(*) FROM work_items") == 600

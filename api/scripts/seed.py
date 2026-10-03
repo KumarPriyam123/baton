@@ -16,9 +16,9 @@ from argon2 import PasswordHasher
 
 from app.config import get_settings
 from app.db.urls import asyncpg_dsn
+from app.demo import DEMO_PASSWORD
 from app.logging import configure_logging
 from scripts.seedlib import generate, load, verify
-from scripts.seedlib.personas import DEMO_PASSWORD
 
 log = structlog.get_logger("baton.seed")
 

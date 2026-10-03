@@ -10,7 +10,6 @@ Every role and the confidential rule are demonstrable:
 
 from dataclasses import dataclass
 
-DEMO_PASSWORD = "baton-demo"  # shown on the login page only when DEMO_MODE=true  # noqa: S105
 EMAIL_DOMAIN = "baton.test"
 
 
