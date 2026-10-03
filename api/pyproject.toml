@@ -59,7 +59,8 @@ known-third-party = ["alembic"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S105", "S106", "S311"]
-"scripts/**" = ["T201"]
+"scripts/**" = ["T201", "PT018", "PT011"]  # asserts state invariants, not a test module
+"scripts/seedlib/text.py" = ["E501"]  # prose pools
 "alembic/**" = ["S608"]  # f-strings over fixed constants, no user input
 
 [tool.mypy]
