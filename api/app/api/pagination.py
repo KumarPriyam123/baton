@@ -7,8 +7,10 @@ import uuid
 
 from app.domain.errors import ValidationFailed
 
-DEFAULT_LIMIT = 20
+DEFAULT_LIMIT = 20  # directories: members, users
 MAX_LIMIT = 50
+ITEM_DEFAULT_LIMIT = 50  # items and events (SPEC 8)
+ITEM_MAX_LIMIT = 100
 
 
 def encode_cursor(name: str, row_id: uuid.UUID) -> str:

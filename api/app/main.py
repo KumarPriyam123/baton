@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from app.api.csrf import CsrfMiddleware
 from app.api.errors import install_error_handlers
 from app.api.request_context import RequestContextMiddleware
-from app.api.routers import auth, demo, health, me, teams, users
+from app.api.routers import auth, demo, health, items, me, teams, users
 from app.config import Settings, get_settings
 from app.db.engine import create_engine
 from app.logging import configure_logging
@@ -45,4 +45,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(demo.router)
     app.include_router(teams.router)
     app.include_router(users.router)
+    app.include_router(items.router)
     return app

@@ -1,0 +1,581 @@
+"""Work-item queries and the only writes to `work_items` (CLAUDE.md I1).
+
+Reads: one statement per request returns everything the item DTO shows (joins, one LATERAL for
+the latest approval), so a list of 100 rows costs the same number of statements as a list of 1.
+Every query that returns or counts items filters with `visibility_clause()` in the WHERE clause,
+before LIMIT (I3).
+
+Writes: `allocate_number`, `insert_item` and `update_item` are called from item commands inside a
+command transaction, followed by `record_event()` (db/tx.py), which writes the history and stamps
+`last_event_id`. Nothing else writes `work_items`; tests/unit/test_single_writer.py enforces it.
+"""
+
+import base64
+import binascii
+import json
+import uuid
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
+import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.sql import Select
+from sqlalchemy.sql.elements import ColumnElement
+
+from app.db import schema
+from app.domain.enums import (
+    ApprovalStatus,
+    DueSource,
+    ItemStatus,
+    ItemType,
+    Resolution,
+)
+from app.domain.errors import ValidationFailed
+from app.domain.policy import ActorContext, visibility_clause
+
+wi = schema.work_items.c
+
+# ----- the item as one flat record ------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ItemRecord:
+    id: uuid.UUID
+    key: str
+    version: int
+    last_event_id: int | None
+    team_id: uuid.UUID
+    team_key: str
+    team_name: str
+    type: ItemType
+    title: str
+    description: str
+    priority: int
+    status: ItemStatus
+    resolution: Resolution | None
+    resolution_note: str | None
+    duplicate_of: str | None  # key of the item this one duplicates
+    confidential: bool
+    requires_approval: bool
+    requester_id: uuid.UUID
+    requester_name: str
+    assignee_id: uuid.UUID | None
+    assignee_name: str | None
+    due_at: datetime | None
+    due_source: DueSource
+    sla_breached_at: datetime | None
+    last_activity_at: datetime
+    created_at: datetime
+    updated_at: datetime
+    resolved_at: datetime | None
+    closed_at: datetime | None
+    approval_id: uuid.UUID | None
+    approval_status: ApprovalStatus | None
+    approval_requested_by_id: uuid.UUID | None
+    approval_requested_by_name: str | None
+    approval_requested_at: datetime | None
+    approval_decided_by_id: uuid.UUID | None
+    approval_decided_by_name: str | None
+    approval_decided_at: datetime | None
+    last_event_kind: str | None
+    last_event_actor_id: uuid.UUID | None
+    last_event_actor_name: str | None
+    last_event_at: datetime | None
+    unread_since_event_id: int | None
+    blocked_reason: str | None
+    has_live_approval: bool  # a pending or an approved approval exists (not only the newest)
+
+    @staticmethod
+    def from_row(row: sa.Row[Any]) -> "ItemRecord":
+        values = dict(row._mapping)
+        values["type"] = ItemType(values["type"])
+        values["status"] = ItemStatus(values["status"])
+        if values["resolution"] is not None:
+            values["resolution"] = Resolution(values["resolution"])
+        values["due_source"] = DueSource(values["due_source"])
+        if values["approval_status"] is not None:
+            values["approval_status"] = ApprovalStatus(values["approval_status"])
+        return ItemRecord(**values)
+
+
+def _live_approval(item_id: ColumnElement[Any]) -> ColumnElement[bool]:
+    ap = schema.approvals.c
+    return sa.exists().where(
+        ap.item_id == item_id,
+        ap.status.in_([ApprovalStatus.PENDING.value, ApprovalStatus.APPROVED.value]),
+    )
+
+
+def _item_query(viewer_id: uuid.UUID) -> Select[Any]:
+    t = schema.teams.c
+    requester = schema.users.alias("requester")
+    assignee = schema.users.alias("assignee")
+    duplicate = schema.work_items.alias("duplicate")
+    ev = schema.item_events.alias("last_event")
+    ev_actor = schema.users.alias("last_event_actor")
+    reads = schema.item_reads
+    ap_requester = schema.users.alias("approval_requester")
+    ap_decider = schema.users.alias("approval_decider")
+    ap_t = schema.approvals.c
+    # The newest approval of the item, if any (approvals_item_idx).
+    latest_approval = (
+        sa.select(
+            ap_t.id,
+            ap_t.status,
+            ap_t.requested_by,
+            ap_t.requested_at,
+            ap_t.decided_by,
+            ap_t.decided_at,
+        )
+        .where(ap_t.item_id == wi.id)
+        .order_by(ap_t.requested_at.desc())
+        .limit(1)
+        .lateral("approval")
+    )
+    blocked_reason = (
+        sa.select(schema.item_events.c.reason)
+        .where(
+            schema.item_events.c.item_id == wi.id,
+            schema.item_events.c.kind == "blocked",
+        )
+        .order_by(schema.item_events.c.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+    source = (
+        schema.work_items.join(schema.teams, t.id == wi.team_id)
+        .join(requester, requester.c.id == wi.requester_id)
+        .outerjoin(assignee, assignee.c.id == wi.assignee_id)
+        .outerjoin(duplicate, duplicate.c.id == wi.duplicate_of_id)
+        .outerjoin(ev, ev.c.id == wi.last_event_id)
+        .outerjoin(ev_actor, ev_actor.c.id == ev.c.actor_id)
+        .outerjoin(reads, sa.and_(reads.c.item_id == wi.id, reads.c.user_id == viewer_id))
+        .outerjoin(latest_approval, sa.true())
+        .outerjoin(ap_requester, ap_requester.c.id == latest_approval.c.requested_by)
+        .outerjoin(ap_decider, ap_decider.c.id == latest_approval.c.decided_by)
+    )
+    return sa.select(
+        wi.id,
+        wi.key,
+        wi.version,
+        wi.last_event_id,
+        wi.team_id,
+        t.key.label("team_key"),
+        t.name.label("team_name"),
+        wi.type,
+        wi.title,
+        wi.description,
+        wi.priority,
+        wi.status,
+        wi.resolution,
+        wi.resolution_note,
+        duplicate.c.key.label("duplicate_of"),
+        wi.confidential,
+        wi.requires_approval,
+        wi.requester_id,
+        requester.c.name.label("requester_name"),
+        wi.assignee_id,
+        assignee.c.name.label("assignee_name"),
+        wi.due_at,
+        wi.due_source,
+        wi.sla_breached_at,
+        wi.last_activity_at,
+        wi.created_at,
+        wi.updated_at,
+        wi.resolved_at,
+        wi.closed_at,
+        latest_approval.c.id.label("approval_id"),
+        latest_approval.c.status.label("approval_status"),
+        latest_approval.c.requested_by.label("approval_requested_by_id"),
+        ap_requester.c.name.label("approval_requested_by_name"),
+        latest_approval.c.requested_at.label("approval_requested_at"),
+        latest_approval.c.decided_by.label("approval_decided_by_id"),
+        ap_decider.c.name.label("approval_decided_by_name"),
+        latest_approval.c.decided_at.label("approval_decided_at"),
+        ev.c.kind.label("last_event_kind"),
+        ev.c.actor_id.label("last_event_actor_id"),
+        ev_actor.c.name.label("last_event_actor_name"),
+        ev.c.created_at.label("last_event_at"),
+        sa.case(
+            (
+                sa.and_(
+                    reads.c.last_read_event_id.is_not(None),
+                    wi.last_event_id > reads.c.last_read_event_id,
+                ),
+                reads.c.last_read_event_id,
+            ),
+            else_=None,
+        ).label("unread_since_event_id"),
+        sa.case((wi.status == ItemStatus.BLOCKED.value, blocked_reason), else_=None).label(
+            "blocked_reason"
+        ),
+        _live_approval(wi.id).label("has_live_approval"),
+    ).select_from(source)
+
+
+async def get_visible_by_key(
+    conn: AsyncConnection, ctx: ActorContext, key: str
+) -> ItemRecord | None:
+    """The item the actor may see, or None (missing and hidden look the same, SPEC 5.1)."""
+    query = _item_query(ctx.user_id).where(wi.key == key, visibility_clause(ctx))
+    row = (await conn.execute(query)).first()
+    return ItemRecord.from_row(row) if row else None
+
+
+async def visible_item_id(conn: AsyncConnection, ctx: ActorContext, key: str) -> uuid.UUID | None:
+    """The id of an item the actor may see (for its events), or None."""
+    found = (
+        await conn.execute(sa.select(wi.id).where(wi.key == key, visibility_clause(ctx)))
+    ).scalar_one_or_none()
+    return uuid.UUID(str(found)) if found is not None else None
+
+
+# ----- what a command needs while it holds the row lock ------------------------------------
+
+
+@dataclass(frozen=True)
+class LockedItem:
+    id: uuid.UUID
+    key: str
+    version: int
+    team_id: uuid.UUID
+    team_name: str
+    type: ItemType
+    title: str
+    description: str
+    priority: int
+    status: ItemStatus
+    due_at: datetime | None
+    due_source: DueSource
+    created_at: datetime
+    confidential: bool
+    requires_approval: bool
+    requester_id: uuid.UUID
+    assignee_id: uuid.UUID | None
+    pending_approval_requested_by: uuid.UUID | None
+    has_live_approval: bool  # a pending or an approved approval exists
+
+
+async def lock_by_key(conn: AsyncConnection, key: str) -> LockedItem | None:
+    """SELECT ... FOR UPDATE on the item row, first thing in every command (SPEC 6.4). Hidden
+    or not, the row is locked; the caller decides what the actor may know about it."""
+    t, ap = schema.teams.c, schema.approvals.c
+    pending_by = (
+        sa.select(ap.requested_by)
+        .where(ap.item_id == wi.id, ap.status == ApprovalStatus.PENDING.value)
+        .scalar_subquery()
+    )
+    row = (
+        await conn.execute(
+            sa.select(
+                wi.id,
+                wi.key,
+                wi.version,
+                wi.team_id,
+                t.name.label("team_name"),
+                wi.type,
+                wi.title,
+                wi.description,
+                wi.priority,
+                wi.status,
+                wi.due_at,
+                wi.due_source,
+                wi.created_at,
+                wi.confidential,
+                wi.requires_approval,
+                wi.requester_id,
+                wi.assignee_id,
+                pending_by.label("pending_approval_requested_by"),
+                _live_approval(wi.id).label("has_live_approval"),
+            )
+            .select_from(schema.work_items.join(schema.teams, t.id == wi.team_id))
+            .where(wi.key == key)
+            .with_for_update(of=schema.work_items)
+        )
+    ).first()
+    if row is None:
+        return None
+    values = dict(row._mapping)
+    values["type"] = ItemType(values["type"])
+    values["status"] = ItemStatus(values["status"])
+    values["due_source"] = DueSource(values["due_source"])
+    return LockedItem(**values)
+
+
+# ----- writes -------------------------------------------------------------------------------
+
+_RETURNED = (
+    wi.id,
+    wi.key,
+    wi.team_id,
+    wi.version,
+    wi.requester_id,
+    wi.assignee_id,
+    wi.confidential,
+)
+
+
+@dataclass(frozen=True)
+class ChangedItem:
+    """The item right after a write: what record_event needs to describe it."""
+
+    id: uuid.UUID
+    key: str
+    team_id: uuid.UUID
+    version: int
+    requester_id: uuid.UUID
+    assignee_id: uuid.UUID | None
+    confidential: bool
+
+
+def _changed(row: sa.Row[Any]) -> ChangedItem:
+    return ChangedItem(**dict(row._mapping))
+
+
+async def allocate_number(conn: AsyncConnection, team_id: uuid.UUID) -> tuple[str, int]:
+    """The next item number of a team. The UPDATE locks the team row until the create commits,
+    which is the whole price of gap-free numbers (SPEC 6.5); a rollback gives the number back."""
+    t = schema.teams
+    row = (
+        await conn.execute(
+            sa.update(t)
+            .where(t.c.id == team_id)
+            .values(item_seq=t.c.item_seq + 1)
+            .returning(t.c.key, t.c.item_seq)
+        )
+    ).one()
+    return f"{row.key}-{row.item_seq}", int(row.item_seq)
+
+
+async def insert_item(conn: AsyncConnection, values: Mapping[str, Any]) -> ChangedItem:
+    row = (
+        await conn.execute(sa.insert(schema.work_items).values(**values).returning(*_RETURNED))
+    ).one()
+    return _changed(row)
+
+
+async def update_item(
+    conn: AsyncConnection,
+    item_id: uuid.UUID,
+    expected_version: int,
+    values: Mapping[str, Any],
+    now: datetime,
+) -> ChangedItem | None:
+    """Change decision-relevant fields and bump the version by exactly 1 (SPEC 6.2). The
+    `version = :expected` guard repeats what the row lock already guarantees: a belt for the
+    braces. None means the version had moved."""
+    row = (
+        await conn.execute(
+            sa.update(schema.work_items)
+            .where(wi.id == item_id, wi.version == expected_version)
+            .values(**values, version=wi.version + 1, updated_at=now)
+            .returning(*_RETURNED)
+        )
+    ).first()
+    return _changed(row) if row else None
+
+
+async def add_watcher(conn: AsyncConnection, item_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    await conn.execute(
+        pg_insert(schema.watchers)
+        .values(item_id=item_id, user_id=user_id)
+        .on_conflict_do_nothing(index_elements=["item_id", "user_id"])
+    )
+
+
+# ----- filters, sorts, keyset pagination (SPEC 8) -----------------------------------------------
+
+
+@dataclass(frozen=True)
+class ItemFilters:
+    team: str | None = None  # team key
+    status: Sequence[ItemStatus] = ()
+    priority: Sequence[int] = ()
+    type: Sequence[ItemType] = ()
+    assignee: str | uuid.UUID | None = None  # "me" | "none" | user id
+    requester: str | uuid.UUID | None = None  # "me" | user id
+    overdue: bool | None = None
+    confidential: bool | None = None
+    updated_since: datetime | None = None
+
+
+_FINISHED = [ItemStatus.RESOLVED.value, ItemStatus.CLOSED.value]
+
+
+def filter_clauses(
+    ctx: ActorContext, filters: ItemFilters, now: datetime
+) -> list[ColumnElement[bool]]:
+    clauses: list[ColumnElement[bool]] = [visibility_clause(ctx)]
+    if filters.team is not None:
+        clauses.append(
+            wi.team_id
+            == sa.select(schema.teams.c.id)
+            .where(schema.teams.c.key == filters.team)
+            .scalar_subquery()
+        )
+    if filters.status:
+        clauses.append(wi.status.in_([s.value for s in filters.status]))
+    if filters.priority:
+        clauses.append(wi.priority.in_(list(filters.priority)))
+    if filters.type:
+        clauses.append(wi.type.in_([t.value for t in filters.type]))
+    if filters.assignee == "none":
+        clauses.append(wi.assignee_id.is_(None))
+    elif filters.assignee is not None:
+        clauses.append(
+            wi.assignee_id == (ctx.user_id if filters.assignee == "me" else filters.assignee)
+        )
+    if filters.requester is not None:
+        clauses.append(
+            wi.requester_id == (ctx.user_id if filters.requester == "me" else filters.requester)
+        )
+    if filters.overdue is not None:
+        late = sa.and_(wi.due_at < now, wi.status.notin_(_FINISHED))
+        clauses.append(late if filters.overdue else sa.not_(sa.func.coalesce(late, sa.false())))
+    if filters.confidential is not None:
+        clauses.append(wi.confidential.is_(filters.confidential))
+    if filters.updated_since is not None:
+        clauses.append(wi.updated_at >= filters.updated_since)
+    return clauses
+
+
+_INFINITY = sa.literal_column("'infinity'::timestamptz", type_=sa.DateTime(timezone=True))
+_DUE = sa.func.coalesce(wi.due_at, _INFINITY)  # null due dates sort last, in ORDER BY and cursor
+
+
+@dataclass(frozen=True)
+class Sort:
+    keys: tuple[ColumnElement[Any], ...]
+    descending: bool
+
+
+SORTS: dict[str, Sort] = {
+    "priority": Sort((wi.priority, _DUE, wi.id), descending=False),
+    "due": Sort((_DUE, wi.id), descending=False),
+    "updated": Sort((wi.updated_at, wi.id), descending=True),
+    "created": Sort((wi.created_at, wi.id), descending=True),
+}
+
+
+def _cursor_values(sort: str, item: ItemRecord) -> list[Any]:
+    due = item.due_at.isoformat() if item.due_at else None
+    match sort:
+        case "priority":
+            return [item.priority, due, str(item.id)]
+        case "due":
+            return [due, str(item.id)]
+        case "updated":
+            return [item.updated_at.isoformat(), str(item.id)]
+        case _:
+            return [item.created_at.isoformat(), str(item.id)]
+
+
+def encode_item_cursor(sort: str, last: ItemRecord) -> str:
+    raw = json.dumps({"s": sort, "v": _cursor_values(sort, last)}, separators=(",", ":"))
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+def _invalid_cursor() -> ValidationFailed:
+    return ValidationFailed(
+        "That cursor is not valid for this sort.",
+        errors=[{"field": "cursor", "message": "Invalid cursor.", "type": "value_error"}],
+    )
+
+
+def _after(sort: str, cursor: str) -> list[Any]:
+    """The bind values of the last row of the previous page, typed like the sort keys."""
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded))
+        if payload["s"] != sort:
+            raise _invalid_cursor()
+        raw = payload["v"]
+        timestamp = sa.DateTime(timezone=True)
+        match sort:
+            case "priority":
+                priority, due, row_id = raw
+                return [
+                    sa.literal(int(priority), sa.SmallInteger()),
+                    sa.func.coalesce(
+                        sa.literal(datetime.fromisoformat(due) if due else None, timestamp),
+                        _INFINITY,
+                    ),
+                    sa.literal(uuid.UUID(row_id), schema.work_items.c.id.type),
+                ]
+            case "due":
+                due, row_id = raw
+                return [
+                    sa.func.coalesce(
+                        sa.literal(datetime.fromisoformat(due) if due else None, timestamp),
+                        _INFINITY,
+                    ),
+                    sa.literal(uuid.UUID(row_id), schema.work_items.c.id.type),
+                ]
+            case _:
+                moment, row_id = raw
+                return [
+                    sa.literal(datetime.fromisoformat(moment), timestamp),
+                    sa.literal(uuid.UUID(row_id), schema.work_items.c.id.type),
+                ]
+    except (binascii.Error, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
+        raise _invalid_cursor() from error
+
+
+async def list_items(
+    conn: AsyncConnection,
+    ctx: ActorContext,
+    filters: ItemFilters,
+    *,
+    sort: str,
+    cursor: str | None,
+    limit: int,
+    now: datetime,
+) -> tuple[list[ItemRecord], str | None]:
+    """One keyset page. Returns the rows and the cursor of the next page (None at the end).
+
+    No OFFSET (I8): the page after row R is `WHERE (sort keys) > (R's sort keys)`, with the id as
+    the last key, so ties can never skip or repeat a row.
+    """
+    spec = SORTS[sort]
+    query = _item_query(ctx.user_id).where(*filter_clauses(ctx, filters, now))
+    if cursor is not None:
+        after = _after(sort, cursor)
+        keys = sa.tuple_(*spec.keys)
+        query = query.where(
+            keys < sa.tuple_(*after) if spec.descending else keys > sa.tuple_(*after)
+        )
+    order = [k.desc() if spec.descending else k.asc() for k in spec.keys]
+    rows = (await conn.execute(query.order_by(*order).limit(limit + 1))).all()
+    records = [ItemRecord.from_row(r) for r in rows]
+    page = records[:limit]
+    more = len(records) > limit
+    return page, encode_item_cursor(sort, page[-1]) if more and page else None
+
+
+async def facet_counts(
+    conn: AsyncConnection, ctx: ActorContext, filters: ItemFilters, now: datetime
+) -> dict[str, dict[str, int]]:
+    """Counts per status, priority, type and team for the same filters, in one pass."""
+    t = schema.teams.c
+    rows = await conn.execute(
+        sa.select(wi.status, wi.priority, wi.type, t.key, sa.func.count().label("n"))
+        .select_from(schema.work_items.join(schema.teams, t.id == wi.team_id))
+        .where(*filter_clauses(ctx, filters, now))
+        .group_by(sa.func.grouping_sets(wi.status, wi.priority, wi.type, t.key))
+    )
+    out: dict[str, dict[str, int]] = {"status": {}, "priority": {}, "type": {}, "team": {}}
+    for row in rows:
+        # Each output row belongs to exactly one grouping set; the columns are never NULL, so the
+        # one that is not NULL says which.
+        if row.status is not None:
+            out["status"][str(row.status)] = row.n
+        elif row.priority is not None:
+            out["priority"][str(row.priority)] = row.n
+        elif row.type is not None:
+            out["type"][str(row.type)] = row.n
+        else:
+            out["team"][str(row.key)] = row.n
+    return out
