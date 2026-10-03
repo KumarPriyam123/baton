@@ -66,7 +66,8 @@ def subject(world: World, **overrides: Any) -> ChangedItem:
 async def fetch(url: str, sql: str, *args: Any) -> list[asyncpg.Record]:
     conn = await asyncpg.connect(asyncpg_dsn(url))
     try:
-        return await conn.fetch(sql, *args)
+        found: list[asyncpg.Record] = await conn.fetch(sql, *args)
+        return found
     finally:
         await conn.close()
 
