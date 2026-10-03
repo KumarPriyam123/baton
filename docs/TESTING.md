@@ -7,8 +7,20 @@ docker compose -f compose.yaml -f compose.test.yaml run --rm api-test
 docker compose -f compose.yaml -f compose.test.yaml run --rm web-test
 ```
 
-Source is mounted into both containers; add `--build` after dependency or Dockerfile changes.
-End-to-end tests arrive in phase 13. A skipped test counts as a failure.
+Source is mounted into both containers; add `--build` after dependency or Dockerfile changes. A skipped test
+counts as a failure. The API tests take about 6 minutes (real Postgres in a separate `db-test` container).
+
+Playwright (three tests, two files in `web/e2e`) runs from the host against a running stack, not from Compose:
+
+```bash
+cd web && npm ci && npx playwright install chromium     # once
+BASE_URL=http://localhost:8080 npx playwright test       # stack up; use your WEB_PORT; PW_CHANNEL=chrome uses installed Chrome
+```
+
+The `--profile e2e` Compose command in CLAUDE.md does not exist yet (KNOWN_LIMITATIONS).
+
+Host-side checks (clean at submission): `cd api && uv run ruff check . && uv run ruff format --check . && uv run mypy app tests scripts`
+and `cd web && npx tsc --noEmit && npx eslint . && npx prettier --check .`.
 
 ## What each layer proves
 
@@ -19,6 +31,19 @@ End-to-end tests arrive in phase 13. A skipped test counts as a failure.
 | Integration | `api/tests/integration` | Postgres | API behaviour |
 | Concurrency | `api/tests/concurrency` | Postgres | races (separate connections) |
 | Performance | `api/tests/perf` | large seed | latency targets |
+
+## Risk to test map (SPEC section 14, CB1 to CB8)
+
+| Risk | Mechanism | Proof (all against real Postgres unless noted) | Sabotage observed |
+|---|---|---|---|
+| **CB1** two people take responsibility at once | conditional `UPDATE` in `repo/items.claim_item` | `tests/concurrency/test_workflow_concurrency.py::test_claim_twenty_concurrent_requests_exactly_one_wins` (20 connections, barrier) and `::test_claim_twenty_concurrent_http_requests_one_200_and_nineteen_409`; browser: `web/e2e/detail-concurrency.spec.ts` (claim race with two users) | guard removed: 20 winners instead of 1 (phase 4 table) |
+| **CB2** stale information | `version` + `If-Match`, checked under the row lock and again in the `UPDATE` | `tests/concurrency/test_items_concurrency.py::test_two_edits_on_the_same_version_at_once_one_wins_the_other_gets_412`, `::test_many_edits_on_one_version_at_once_exactly_one_wins`, `tests/integration/test_items_patch.py`; browser: stale description edit in `detail-concurrency.spec.ts` | both checks removed: 7 then 10 tests red |
+| **CB3** repeated request | idempotency key inserted in the command transaction | `::test_ten_concurrent_creates_with_one_key_make_exactly_one_item_and_ten_equal_answers`, `::test_the_same_key_with_a_different_body_is_422_and_creates_nothing`, `tests/db/test_idempotency_layer.py`; browser: `web/e2e/create-double-submit.spec.ts` (first answer dropped, double click, one item) | check-then-insert: red |
+| **CB4** workflow rules | `domain/workflow.py` + DB CHECKs | `tests/unit/test_workflow_flow.py` (T-FLOW: 15 actions x statuses x relationships, 720 cells, typed from SPEC), `tests/db/test_constraints.py` (28 guards, each dropped inside the test to prove it is the one that fires), `tests/integration/test_item_transitions.py` (`APPROVAL_REQUIRED`) | approval check in resolve removed: 3 red |
+| **CB5** approved content changes | subject hash, invalidation on material edit/transfer, `approve` needs `If-Match` | `test_workflow_concurrency.py::test_approve_racing_an_edit_never_leaves_an_approval_on_content_nobody_reviewed` (50 rounds), `tests/integration/test_item_approvals.py` | invalidation removed: race test red; `If-Match` removed in approve: 5 red |
+| **CB6** resource-level authorization | `can_view` (Python) and `visibility_clause` (SQL) | `tests/db/test_visibility_parity.py` (T-VIS: 24 users and 300 random role combinations x 600 items, counts, `LIMIT`), `tests/unit/test_policy_matrix.py` (2,475 cells), HTTP checks in `test_items_create_read.py`, `test_search.py`, `test_attention.py`, `test_notifications.py` | clause without the confidential rule: test red and names the leaked items |
+| **CB7** reliable async work | outbox, `SKIP LOCKED`, lease, backoff, idempotent handlers | `tests/integration/test_worker.py`: `test_two_runners_against_500_jobs_do_each_side_effect_exactly_once`, `test_a_job_held_by_a_dead_runner_is_taken_over_after_the_lease_and_runs_once`, `test_a_job_that_always_fails_backs_off_dies_after_8_tries_and_can_be_requeued`, `test_the_same_job_delivered_twice_notifies_each_person_once_and_never_the_actor`, `test_two_sla_sweeps_at_once_...` | none run (phase 6 was lean) |
+| **CB8** optimistic UI vs the server | merge by `(version, last_event_id)`, one key per user action, mutation scope, rebase | Vitest (jsdom, MSW): `web/src/lib/itemCache.test.ts` (older never replaces newer), `useCommand.test.tsx` (same key and `If-Match` on every retry, new key per action, commands on one item run in order), `rebase.test.ts` (disjoint 412 rebases, overlap does not), `features/item/Description.test.tsx` (412 flow, conflict dialog choices), `actions.test.tsx` (the bar offers only `allowed_actions`) | none run (frontend sessions were lean) |
 
 ## Tests that must go red when their guard is removed
 
@@ -182,3 +207,26 @@ turned `test_claims_by_a_member_being_removed_leave_no_item_with_them` red in 3 
 can only make a missing lock likely to show, not certain.
 
 Whole suite at the end of phase 4: 3,325 API tests (unit, db, integration, concurrency; none skipped; about 350 s) and 4 web tests.
+
+## What is deliberately not tested
+
+Nothing here is hidden: each item is either in KNOWN_LIMITATIONS with its reason, or listed below.
+
+- **No performance or load tests.** `api/tests/perf` is empty and `scripts/bench.py` does not exist; the SPEC 13
+  latency targets were not measured. The large seed (50,000 items) loads and every history replays, 17 s
+  (see "Seed verification"), but no p95 was recorded.
+- **No live-update tests.** SSE is not built; polling is covered only by what Playwright happened to see (a change
+  appeared after about 9 s, checked by hand). No test for the 10 s timer, the hidden-tab pause or reconnects.
+- **Playwright covers three scenarios.** Not covered by Playwright: approve after a *description* edit, a disjoint
+  edit, any screen other than login, inbox, queue, create and item detail, and a second browser engine.
+  The disjoint rebase is a Vitest test only.
+- **No accessibility run** (axe is not wired), no screen-reader test, no 375 px layout test, no visual regression.
+- **Worker through real processes:** the worker is tested in-process with real Postgres; stopping and
+  restarting the `docker compose` worker was checked by hand only, as were two workers (`--scale worker=2`).
+- **Phase 5 read paths** have one test per rule, not property tests over every persona (only the item list,
+  detail and search paths are in T-VIS terms); see "Phase 5 was time-boxed" in KNOWN_LIMITATIONS.
+- **No sabotage runs** for phases 5 and 6 and the frontend sessions; the table above says "none run".
+- **Browsers other than Chrome/Chromium**, Windows-specific line endings in containers (guarded by `.gitattributes`,
+  checked once by a fresh clone), and the Postgres image upgrade path are untested.
+- **Security testing** is limited to CSRF, session, throttling and visibility tests (nothing asserts that Markdown cannot inject HTML; `react-markdown` without `rehype-raw` is the guard); no
+  fuzzing, dependency audit or penetration test.
