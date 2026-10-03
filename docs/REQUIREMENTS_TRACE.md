@@ -4,6 +4,17 @@ Every requirement in the Newtonite brief, where Baton meets it, the phase that b
 
 Status: ☐ not started · ◐ built, proof pending · ☑ proven
 
+## Phase 0: foundation (no brief rows of its own; it carries G10, D1-D3, D5)
+
+| Done-when | Status | Proof |
+|---|---|---|
+| `docker compose up --build` serves the placeholder and `/api/v1/healthz` returns `ok` through nginx | ☑ on 8081 and 8082 · 8080 itself deferred to the phase 14 clean-clone check | `curl` through nginx on 8081/8082 (200, `{"status":"ok"}`, `x-request-id`); Chrome screenshot "API status: ok"; another local project holds 8080 (`WEB_PORT` overrides the host port) |
+| `api-test` command passes a trivial test | ☑ | `docker compose -f compose.yaml -f compose.test.yaml run --rm api-test`: 20 passed, 0 skipped; also from a fresh clone and in CI |
+| `TEST_DATABASE_URL` unset makes pytest fail, not skip | ☑ | exit 2 with the message, run in the container with it empty; `test_pytest_fails_instead_of_skipping_when_test_database_url_is_unset` |
+| CI green on GitHub | ☑ | https://github.com/KumarPriyam123/baton/actions/runs/37122809241 (api, web, hygiene all success) |
+| LF everywhere, gitleaks clean, PDF and `.env` untracked | ☑ | `git ls-files --eol` has no CRLF; gitleaks scanned 12 commits locally and in CI, no leaks; CI `hygiene` job fails on CRLF, tracked PDF or `.env` |
+| `X-Request-ID` on every response, same id in the API log line | ☑ | `test_same_request_id_appears_in_the_api_log_line`, `test_unhandled_exception_returns_problem_json_with_request_id`; manual check through nginx |
+
 ## The situation (pain points the product must fix)
 
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
@@ -94,7 +105,7 @@ Status: ☐ not started · ◐ built, proof pending · ☑ proven
 | G7 | Data consistency | single transaction per command; outbox; DB constraints | event invariant; rollback test | ☐ |
 | G8 | Search and filtering | FTS + trigram + facets + URL filters | search tests | ☐ |
 | G9 | Application performance | indexes, budgets, virtualisation | PERFORMANCE.md | ☐ |
-| G10 | Maintainability | pure domain modules, layered code, generated client, CI, docs | CI; layout | ☐ |
+| G10 | Maintainability | pure domain modules, layered code, generated client, CI, docs | CI; layout | ◐ phase 0: layout, CI green (run 37122809241), pre-commit; domain modules and client later |
 | G11 | Smaller system with well-considered behaviour over many incomplete features | explicit out-of-scope list | KNOWN_LIMITATIONS.md | ☐ |
 
 ## Critical behaviour (at least three beyond CRUD)
@@ -115,11 +126,11 @@ Status: ☐ not started · ◐ built, proof pending · ☑ proven
 
 | ID | Brief asks for | Where | Status |
 |---|---|---|---|
-| D1 | Working source code | repository | ☐ |
-| D2 | Clear instructions for running the application | README Quick start (verified from a clean clone) | ☐ |
-| D3 | Any required setup instructions | README; `.env.example` | ☐ |
+| D1 | Working source code | repository (private: github.com/KumarPriyam123/baton) | ◐ phase 0 skeleton pushed |
+| D2 | Clear instructions for running the application | README Quick start (verified from a clean clone) | ◐ stub verified from a clean clone on 8082; 8080 itself deferred to the phase 14 clean-clone check |
+| D3 | Any required setup instructions | README; `.env.example` | ◐ `.env.example` lists every variable; README stub |
 | D4 | Engineering decisions document (~5 decisions, trade-offs) | `docs/ENGINEERING_DECISIONS.md` | ☐ |
-| D5 | Automated tests for important behaviour, reflecting the architecture's risks | `api/tests`, `web/src/**/*.test.ts`, `web/e2e`; `docs/TESTING.md` | ☐ |
+| D5 | Automated tests for important behaviour, reflecting the architecture's risks | `api/tests`, `web/src/**/*.test.ts`, `web/e2e`; `docs/TESTING.md` | ◐ phase 0: test harness, fail-not-skip guard (20 api + 4 web tests) |
 | D6 | Brief description of known limitations | `docs/KNOWN_LIMITATIONS.md` | ☐ |
 | D7 | Architecture diagrams or extra docs (welcome) | `docs/ARCHITECTURE.md` | ☐ |
 | D8 | Important assumptions documented | README Assumptions (SPEC §1) | ☐ |

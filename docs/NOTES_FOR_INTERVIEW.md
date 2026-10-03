@@ -6,9 +6,53 @@ Written for Kumar, to explain any part of Baton live.
 
 Each entry: **problem → root cause → fix → lesson**.
 
-_None recorded yet._
+### Phase 0
+
+**1. Tests ran old code and still looked fine**
+- Problem: after fixing a bug, `api-test` failed with the same assertion as before.
+- Root cause: `docker compose run` reuses an existing image; it never rebuilds. The container had the old source baked in.
+- Fix: `api-test` mounts `./api`, `web-test` mounts `./web/src`. Dependencies live in `/opt/venv` and `node_modules`, outside the mount, so the mount can't hide them. Dependency or Dockerfile changes still need `--build` (recorded in CLAUDE.md).
+- Lesson: the failure mode here is the same family as skipped tests: a green or red result that doesn't describe the current code. Make "tests ran current code" structural, not a habit.
+
+**2. The access log lost `/api/v1` from the route**
+- Problem: log line said `route: "/healthz"`, test expected `/api/v1/healthz`.
+- Root cause: FastAPI 0.142 resolves `include_router(prefix=...)` lazily; `scope["route"].path` is the inner route without the prefix. Only a prefix declared on the `APIRouter` itself survives (checked three wirings).
+- Fix: routers declare `APIRouter(prefix=API_PREFIX...)`; shared constant in `app/api/constants.py`.
+- Lesson: when a framework upgrade changes internals, test the observable output (the log line), not the wiring.
+
+**3. `npm install` failed with ERESOLVE**
+- Problem: ESLint 10 and `eslint-plugin-jsx-a11y` conflict.
+- Root cause: jsx-a11y's peer range stops at ESLint 9.
+- Fix: pin `eslint@9` and `@eslint/js@9` instead of `--force` or `--legacy-peer-deps`. Recorded as Decision 4.
+- Lesson: resolve a peer conflict by choosing a version, not by silencing the resolver.
+
+**4. Port 8080 was already taken**
+- Problem: `web` failed to bind 8080.
+- Root cause: an unrelated project's container (`infra-latex-1`) publishes it.
+- Fix: host port is `${WEB_PORT:-8080}`; default unchanged; verified on 8081 and 8082. Not stopped, since it isn't ours. Recorded as Decision 3; the 8080 check is deferred to phase 14.
+- Lesson: say "unverified on 8080" rather than quietly changing the target.
+
+**5. CI "gitleaks" step failed, while reporting "no leaks"**
+- Problem: `hygiene` job red; the log said "no leaks found in partial scan".
+- Root cause: the gitleaks action scans `<first-commit>^..HEAD`; a root commit has no parent, so git errored and 0 bytes were scanned. A green result there would have meant nothing.
+- Fix: run the pinned gitleaks CLI over the full history (same version as pre-commit). 12 commits scanned.
+- Lesson: "no findings" is only evidence if you know how much was scanned. Check the byte or commit count.
+
+**6. Two Git Bash traps**
+- A large heredoc with mixed quotes failed to parse (nothing ran, so nothing was half-written). Use the file-writing tool for source files.
+- `docker run -v "$(pwd -W):/repo"` was rewritten to `C:/Program Files/Git/repo`. Fix: `MSYS_NO_PATHCONV=1`.
 
 ## Explain this phase
 
-One section per phase, about ten lines: what was built, the key decision and its alternative,
-what breaks if the main guard is removed, and the `file:line` where that guard lives.
+### Phase 0: foundation
+
+1. **What was built.** An empty but real stack: Postgres, a placeholder `migrate`, a FastAPI API, a heartbeat worker, and a React page behind nginx. Tests run in containers against a real tmpfs Postgres. CI runs lint, types, tests, build, and repository hygiene (LF, no PDF/`.env`, gitleaks).
+2. **Key decision: tests fail, never skip, when there is no database.** `pytest_sessionstart` in `api/tests/conftest.py` calls `pytest.exit(..., returncode=2)` if `TEST_DATABASE_URL` is missing.
+3. **Alternative.** `pytest.mark.skipif` or a fixture that skips. That is how a suite reads "130 passed, 16 skipped" and still looks green.
+4. **What breaks if the guard is removed.** Database tests silently disappear on a machine without the variable, and CI would stay green without proving anything. `test_pytest_fails_instead_of_skipping_when_test_database_url_is_unset` runs pytest in a subprocess without the variable and goes red.
+5. **Where it lives.** `api/tests/conftest.py:22`.
+6. **Second guard: prod refuses demo and fault injection.** `refuse_demo_and_faults_in_prod` in `api/app/config.py:26`. Without it, `ENV=prod` with `DEMO_MODE=true` would expose the account switcher. "Set" is read as enabled (Decision 2); tests in `tests/unit/test_config.py`.
+7. **Third guard: request ids.** `resolve_request_id` in `api/app/api/request_context.py:22` only accepts `^[A-Za-z0-9._-]{1,128}$` (line 17), because the id goes into logs and headers. Remove it and a client could inject arbitrary text into a header or log line. Crashes also return problem+json with the id (`:77`).
+8. **Fourth guard: LF endings.** `.gitattributes:1` (`* text=auto eol=lf`) and the CI `hygiene` job. Without them a CRLF entrypoint fails in Linux with `/bin/sh^M: not found`.
+9. **nginx.** `/api/v1/stream` has `proxy_buffering off` and a 1 h read timeout, so SSE (phase 7) isn't buffered or cut off. `X-Request-ID` is forwarded, or generated by nginx if the client sent none.
+10. **Not done on purpose.** No schema, auth, CSRF or CSP yet; each belongs to a later phase.
