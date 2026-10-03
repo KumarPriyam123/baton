@@ -35,6 +35,20 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # One-shot: loads the demo data when the database is empty, otherwise does nothing.
+  # Re-seed from scratch with: docker compose run --rm seed python -m scripts.seed --size demo --reset
+  seed:
+    build:
+      context: ./api
+    environment: *api-env
+    command: ["python", "-m", "scripts.seed", "--size", "demo"]
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
   api:
     build:
       context: ./api
