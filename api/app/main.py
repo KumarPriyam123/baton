@@ -5,7 +5,7 @@ from fastapi import FastAPI
 
 from app.api.errors import install_error_handlers
 from app.api.request_context import RequestContextMiddleware
-from app.api.routers import health
+from app.api.routers import auth, health, me
 from app.config import Settings, get_settings
 from app.db.engine import create_engine
 from app.logging import configure_logging
@@ -34,6 +34,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     install_error_handlers(app)
+    # The last middleware added is the outermost: the request id is assigned first, so every
+    # response (including a CSRF rejection) carries it, then CSRF is checked, then routing.
     app.add_middleware(RequestContextMiddleware)
     app.include_router(health.router)
+    app.include_router(auth.router)
+    app.include_router(me.router)
     return app
