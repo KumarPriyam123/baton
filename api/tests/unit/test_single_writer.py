@@ -14,7 +14,7 @@ APP = Path(__file__).resolve().parents[2] / "app"
 WORK_ITEM_WRITERS = {"repo/items.py", "db/tx.py"}
 EVENT_WRITERS = {"db/tx.py"}
 
-OUTBOX_WRITERS = {"db/tx.py"}  # the worker (phase 6) will join them to mark rows done or dead
+OUTBOX_WRITERS = {"db/tx.py", "repo/outbox.py"}  # enqueue; claim, complete, fail (the worker)
 
 WRITES_WORK_ITEMS = re.compile(
     r"(?:insert|update|delete)\(\s*(?:schema\.)?work_items\b"

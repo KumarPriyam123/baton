@@ -15,9 +15,11 @@ import re
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -98,3 +100,54 @@ async def similar_items(
         SimilarRecord(r.id, r.key, r.title, str(r.status), int(r.priority), float(r.score))
         for r in rows
     ]
+
+
+# ----- the duplicate finder's side (worker) -----------------------------------------------------
+
+
+async def similar_to(
+    conn: AsyncConnection, item_id: uuid.UUID, team_id: uuid.UUID, title: str
+) -> list[SimilarRecord]:
+    """Open items of the team close to this one's title, excluding itself. No visibility rule: the
+    result is stored in `item_similar` and filtered by whoever reads it."""
+    score = sa.func.similarity(wi.title, title)
+    rows = await conn.execute(
+        sa.select(wi.id, wi.key, wi.title, wi.status, wi.priority, score.label("score"))
+        .where(
+            wi.team_id == team_id,
+            wi.id != item_id,
+            wi.status.notin_(_FINISHED),
+            wi.title.op("%", return_type=sa.Boolean)(title),
+            score > SIMILAR_MIN_SCORE,
+        )
+        .order_by(score.desc(), wi.id)
+        .limit(SIMILAR_LIMIT)
+    )
+    return [
+        SimilarRecord(r.id, r.key, r.title, str(r.status), int(r.priority), float(r.score))
+        for r in rows
+    ]
+
+
+async def upsert_similar(
+    conn: AsyncConnection, item_id: uuid.UUID, found: Sequence[SimilarRecord], now: datetime
+) -> None:
+    stmt = pg_insert(schema.item_similar).values(
+        [
+            {"item_id": item_id, "similar_item_id": f.id, "score": f.score, "created_at": now}
+            for f in found
+        ]
+    )
+    await conn.execute(
+        stmt.on_conflict_do_update(
+            index_elements=["item_id", "similar_item_id"], set_={"score": stmt.excluded.score}
+        )
+    )
+
+
+async def has_suggestion_event(conn: AsyncConnection, item_id: uuid.UUID) -> bool:
+    e = schema.item_events.c
+    found = await conn.execute(
+        sa.select(e.id).where(e.item_id == item_id, e.kind == "duplicate_suggested").limit(1)
+    )
+    return found.first() is not None

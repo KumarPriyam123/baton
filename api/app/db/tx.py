@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -107,7 +108,34 @@ async def run_command[T](
 # ----- history (CLAUDE.md I1) -----------------------------------------------------------------
 
 OUTBOX_TOPIC = "item.event"
+CREATED_TOPIC = "item.created"
 NOTIFY_CHANNEL = "item_changes"
+NOTIFICATIONS_CHANNEL = "notifications"
+
+
+async def enqueue(
+    conn: AsyncConnection,
+    topic: str,
+    payload: dict[str, Any],
+    *,
+    dedupe_key: str | None = None,
+) -> None:
+    """Add a job to the outbox in the caller's transaction (I7). `dedupe_key` is UNIQUE: a second
+    job with the same key is dropped, so a retried command cannot queue the work twice."""
+    await conn.execute(
+        pg_insert(schema.outbox)
+        .values(topic=topic, payload=payload, dedupe_key=dedupe_key)
+        .on_conflict_do_nothing(index_elements=["dedupe_key"])
+    )
+
+
+async def notify_user(conn: AsyncConnection, user_id: uuid.UUID) -> None:
+    """Tell the live-update layer (phase 7) that `user_id` has a new notification. Delivered only
+    if the transaction commits."""
+    await conn.execute(
+        sa.text("SELECT pg_notify(:channel, :payload)"),
+        {"channel": NOTIFICATIONS_CHANNEL, "payload": json.dumps({"user_id": str(user_id)})},
+    )
 
 
 class EventSubject(Protocol):

@@ -462,6 +462,38 @@ async def lock_keys_owned_by(
     return [str(k) for k in rows.scalars()]
 
 
+async def key_of_id(conn: AsyncConnection, item_id: uuid.UUID) -> str | None:
+    found = (await conn.execute(sa.select(wi.key).where(wi.id == item_id))).scalar_one_or_none()
+    return str(found) if found is not None else None
+
+
+async def mark_sla_breached(
+    conn: AsyncConnection, now: datetime, limit: int
+) -> list[tuple[ChangedItem, datetime]]:
+    """SPEC 9: stamp `sla_breached_at` on open items past their due date, once. The `IS NULL` guard
+    is what makes a second sweep (or a second worker) do nothing for the same item. The rows are
+    locked with SKIP LOCKED in due order, at most `limit` at a time (I8). The version does not move
+    (SPEC 6.2); the caller writes the `sla_breached` event through `record_event`."""
+    due = (
+        sa.select(wi.id)
+        .where(wi.due_at < now, wi.sla_breached_at.is_(None), wi.status.notin_(_FINISHED))
+        .order_by(wi.due_at, wi.id)
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    rows = await conn.execute(
+        sa.update(schema.work_items)
+        .where(wi.id.in_(due.scalar_subquery()))
+        .values(sla_breached_at=now)
+        .returning(*_RETURNED, wi.due_at)
+    )
+    out: list[tuple[ChangedItem, datetime]] = []
+    for row in rows.all():
+        values = {k: v for k, v in row._mapping.items() if k != "due_at"}
+        out.append((ChangedItem(**values), row.due_at))
+    return out
+
+
 async def add_watcher(conn: AsyncConnection, item_id: uuid.UUID, user_id: uuid.UUID) -> None:
     await conn.execute(
         pg_insert(schema.watchers)

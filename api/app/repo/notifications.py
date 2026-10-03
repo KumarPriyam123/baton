@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.db import schema
@@ -90,3 +91,85 @@ async def mark_read(
     if ids is not None:
         stmt = stmt.where(n.id.in_(ids))
     return len((await conn.execute(stmt)).all())
+
+
+# ----- fan-out (the worker's side) --------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EventToNotify:
+    id: int
+    kind: str
+    item_id: uuid.UUID
+    actor_id: uuid.UUID | None
+    team_id: uuid.UUID
+    requester_id: uuid.UUID
+    assignee_id: uuid.UUID | None
+    confidential: bool
+    status: str
+
+
+async def event_to_notify(conn: AsyncConnection, event_id: int) -> EventToNotify | None:
+    """The event and the item as it is now. Who may see the item is judged against the item now, not
+    when the event happened: someone who lost access since must not be told about it."""
+    ev = schema.item_events.c
+    row = (
+        await conn.execute(
+            sa.select(
+                ev.id,
+                ev.kind,
+                ev.item_id,
+                ev.actor_id,
+                wi.team_id,
+                wi.requester_id,
+                wi.assignee_id,
+                wi.confidential,
+                wi.status,
+            )
+            .select_from(schema.item_events.join(schema.work_items, wi.id == ev.item_id))
+            .where(ev.id == event_id)
+        )
+    ).first()
+    return EventToNotify(**dict(row._mapping)) if row else None
+
+
+async def candidate_user_ids(conn: AsyncConnection, e: EventToNotify) -> set[uuid.UUID]:
+    """Requester, assignee and watchers, minus the actor and anyone deactivated (SPEC 9)."""
+    w, u = schema.watchers.c, schema.users.c
+    wanted = {e.requester_id}
+    if e.assignee_id is not None:
+        wanted.add(e.assignee_id)
+    wanted.update(
+        (await conn.execute(sa.select(w.user_id).where(w.item_id == e.item_id))).scalars()
+    )
+    if e.actor_id is not None:
+        wanted.discard(e.actor_id)
+    active = await conn.execute(sa.select(u.id).where(u.id.in_(wanted), u.deactivated_at.is_(None)))
+    return {uuid.UUID(str(user_id)) for user_id in active.scalars()}
+
+
+async def insert_notifications(
+    conn: AsyncConnection, e: EventToNotify, user_ids: list[uuid.UUID], now: datetime
+) -> list[uuid.UUID]:
+    """One row per user; `UNIQUE (user_id, event_id)` makes a second delivery of the same job add
+    nothing. Returns the users who got a NEW notification."""
+    if not user_ids:
+        return []
+    stmt = (
+        pg_insert(schema.notifications)
+        .values(
+            [
+                {
+                    "user_id": user_id,
+                    "item_id": e.item_id,
+                    "event_id": e.id,
+                    "kind": e.kind,
+                    "created_at": now,
+                }
+                for user_id in user_ids
+            ]
+        )
+        .on_conflict_do_nothing(index_elements=["user_id", "event_id"])
+        .returning(n.user_id)
+    )
+    return [uuid.UUID(str(uid)) for uid in (await conn.execute(stmt)).scalars()]

@@ -11,7 +11,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.db.tx import CommandTx, record_event
+from app.db.tx import CREATED_TOPIC, CommandTx, enqueue, record_event
 from app.domain import workflow
 from app.domain.enums import ApprovalStatus, EventKind, ItemStatus, ItemType, TeamRole
 from app.domain.errors import Forbidden, NotFound, ValidationFailed
@@ -171,6 +171,14 @@ async def create_item(tx: CommandTx, ctx: ActorContext, command: CreateItem) -> 
             "confidential": defaults.confidential,
             "requires_approval": requires_approval,
         },
+    )
+    # The duplicate finder runs after the commit, from the outbox (SPEC 9); the key makes a second
+    # enqueue for the same item a no-op.
+    await enqueue(
+        tx.conn,
+        CREATED_TOPIC,
+        {"item_id": str(item.id), "request_id": tx.request_id},
+        dedupe_key=f"dup:{item.id}",
     )
     return await get_item(tx.conn, ctx, key, tx.now)
 
