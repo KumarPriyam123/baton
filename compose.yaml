@@ -1,0 +1,82 @@
+# Baton: `docker compose up --build` -> http://localhost:8080
+# Every ${VAR:-default} below works without a .env file (see .env.example).
+
+x-api-env: &api-env
+  ENV: ${ENV:-dev}
+  DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://baton:baton@db:5432/baton}
+  DEMO_MODE: ${DEMO_MODE:-true}
+  SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+  FAULT_NOTIFY_FAIL_RATE: ${FAULT_NOTIFY_FAIL_RATE:-0}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-baton}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-baton}
+      POSTGRES_DB: ${POSTGRES_DB:-baton}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # One-shot. Phase 1 replaces the command with `alembic upgrade head`.
+  migrate:
+    build:
+      context: ./api
+    environment: *api-env
+    command: ["sh", "-c", "echo 'migrate: no migrations yet (arrives in phase 1)'"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: ./api
+    environment: *api-env
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/healthz', timeout=2)"
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./api
+    environment: *api-env
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # The only published service. nginx serves the SPA and proxies /api to the api service.
+  web:
+    build:
+      context: ./web
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
