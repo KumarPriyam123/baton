@@ -7,8 +7,9 @@ import httpx
 
 from app.config import Settings
 from tests.integration.test_teams_members import signed_in
-from tests.support.items import created, signed_in_as
+from tests.support.items import created, scalar, signed_in_as
 from tests.support.seeded import SeededDatabase
+from tests.support.users import execute
 from tests.support.workflow import (
     ASHA,
     DEV_VIEWER,
@@ -91,6 +92,33 @@ async def test_claiming_an_item_someone_else_owns_is_409_with_who_and_when(
     assert body["claimed_at"]
     assert body["current"]["assignee"]["name"] == "Asha Rao"
     assert "Asha Rao" in body["detail"]
+
+
+async def test_a_claim_never_takes_an_item_that_has_an_owner_even_if_its_status_says_new(
+    api: httpx.AsyncClient, seeded: SeededDatabase, app_settings: Settings
+) -> None:
+    """Bad data (an owner on a `new` item) must not let a claim overwrite the owner."""
+    item = await new_item(api)
+    await execute(
+        seeded.url,
+        "UPDATE work_items SET assignee_id = (SELECT id FROM users WHERE email = $1) "
+        "WHERE key = $2",
+        RAHUL,
+        item["key"],
+    )
+    async with signed_in_as(app_settings, ASHA) as asha:
+        late = await act(asha, item["key"], "claim")
+
+    assert late.status_code == 409
+    assert late.json()["code"] == "ALREADY_CLAIMED"
+    assert late.json()["claimed_by"]["name"] == "Rahul Verma"
+    owner = await scalar(
+        seeded.url,
+        "SELECT u.email::text FROM work_items w JOIN users u ON u.id = w.assignee_id "
+        "WHERE w.key = $1",
+        item["key"],
+    )
+    assert owner == RAHUL
 
 
 async def test_who_may_claim(api: httpx.AsyncClient, app_settings: Settings) -> None:

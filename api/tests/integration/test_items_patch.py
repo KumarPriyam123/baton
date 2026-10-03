@@ -518,6 +518,21 @@ async def test_a_stale_edit_is_412_with_the_item_now_and_exactly_what_changed(
     assert (await api.get(f"{ITEMS}/{item['key']}")).json()["title"] == item["title"]  # not applied
 
 
+async def test_a_stale_edit_that_would_change_nothing_is_still_412(
+    api: httpx.AsyncClient, app_settings: Settings
+) -> None:
+    """The author's view is out of date even if their edit happens to match the item now."""
+    await signed_in(api, MEERA)
+    item = await created(api, priority=2)
+    async with signed_in_as(app_settings, ASHA) as other:
+        await edited(other, item, {"priority": 1})
+
+    same_as_now = await patch_item(api, item["key"], {"priority": 1}, version=1)
+
+    assert same_as_now.status_code == 412
+    assert same_as_now.json()["code"] == "VERSION_CONFLICT"
+
+
 async def test_comments_and_system_notes_are_not_in_changes_since(
     api: httpx.AsyncClient, seeded: SeededDatabase, app_settings: Settings
 ) -> None:
