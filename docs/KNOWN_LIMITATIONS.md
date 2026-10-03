@@ -114,3 +114,31 @@ that was also out of date learns about the wait first and about the other change
 
 `approvals.invalidated_reason` also holds why a request was cancelled by the system ("transferred",
 "Removed from Payments"). The SPEC 3.2 table has no separate column; the events carry the same text.
+
+## Phase 5 was time-boxed: what is NOT tested
+
+Phase 5 has one test per rule or endpoint (visibility on every new read path, idempotency on every new
+write, each attention rule, the search rules). Deliberately left out, so nobody reads green as proof:
+
+- **No T-VIS property test** over all demo users for search, facets, attention, similar and
+  notifications. The visibility rule is in the WHERE clause of each query and the phase 3 HTTP
+  confidentiality test now covers search, attention and notifications for one confidential item, a
+  member and a lead; that is an example, not a proof over every persona.
+- **No query-count guard** on attention or the list (BUILD_PLAN asked for one), and no `EXPLAIN` of the
+  five attention queries on `baton_large`. Each is written to hit an existing index
+  (`work_items_assignee_open_idx`, the "needs an owner" and going-stale indexes, `approvals` by item),
+  but that is by reading, not measured. "Your requests" can scan all of one requester's items until it
+  finds ten unread ones.
+- **No sabotage checks** (for example: drop `visibility_clause` from one section and see what goes red)
+  and **no independent review** of phase 5.
+- **No test of search ranking edge cases:** stop words, quotes or `-` in `websearch_to_tsquery` input,
+  very short queries and the trigram threshold (a 3-letter typo may not match). Only the three rules the
+  plan names are tested: key jump, title above description, one typo.
+- **No concurrency test** of two comments or two reads on one item at once (the comment takes the item
+  row lock like every command, and read is one statement, but neither is exercised under load).
+- **Not tested:** `GET /items/similar` excluding resolved and closed items; the 50-result cap of a
+  search; notification paging past hidden rows; the 412 of a stale client around a comment.
+
+Known and not fixed: the full notification list (`unread=false`) has no index of its own, since SPEC 3.2
+lists only the partial unread one, so it reads and sorts one user's rows. Fine while the cleanup job
+(phase 6) keeps them bounded; a `(user_id, id DESC)` index is the fix if `EXPLAIN` asks for it.

@@ -422,3 +422,30 @@ Not changed:
 - **T-FLOW drives `allowed_actions`**, not `evaluate` per cell, and uses non-confidential facts. The
   `evaluate` rules (reasons, resolutions, approval gate) have their own tests; confidentiality is
   covered by the new edge tests.
+
+## 46. Phase 5: search, attention and collaboration readings of the SPEC
+
+Decided with the phase 5 prompt; none of them changes a SPEC rule, each fills a gap.
+
+- **`q` is ranked, not paged.** `q` with `cursor` or an explicit `sort` is 400 (a silently ignored
+  parameter is what decision 29 forbids); `limit` above 50 is cut to 50 (SPEC 8: "top 50"). A key-shaped
+  `q` lists the exact key first, then the text matches. Rank = `ts_rank` (title and key weigh A,
+  description B) + trigram `word_similarity` on the title; plain `similarity` would miss a typo in a
+  long title. `/items/facets?q=` counts every match, not only the top 50.
+- **`GET /items/similar` takes `team_id` as SPEC 8 and 11 say.** `TeamOut` had no id, so `GET /teams` now
+  returns `id` (additive) or a client could not call it. `%` finds candidates through the GIN index, the
+  explicit `similarity > 0.35` is the SPEC's threshold.
+- **A comment answers `{comment, item}`.** The item so the client cache can merge by `last_event_id`
+  (a comment never moves `version`, decision 8). `If-Match` is not needed; the key is required.
+- **The item DTO gains `watching`.** SPEC 11's sample has none, but a Watch button cannot show its state
+  without it. Watch/unwatch/read write no event and take no key (SPEC 11 lists none); both are
+  naturally idempotent. Read is one `INSERT ... SELECT ... ON CONFLICT` that applies the visibility
+  rule and takes `GREATEST` of the old marker, so it can neither exist for a hidden item nor go back.
+- **Attention.** "Active" in "going quiet" is `in_progress` or `blocked` (the SPEC 3.2 index). "Needs an
+  owner" is for members and leads only (a viewer cannot claim). "Your requests" means: the item's newest
+  event is newer than your read marker (0 if you never opened it) **and was written by someone else**,
+  so your own action is never news. Counts are `LIMIT 100`, shown as "100+" at 100; a section with fewer
+  than 10 items skips the count query.
+- **Notifications** list newest first by id; `unread=true` uses the partial index. SPEC lists no index for
+  the full list, so it reads one user's rows (KNOWN_LIMITATIONS). Marking read touches only the caller's
+  rows, so another person's id in the request is ignored. The worker that creates them is phase 6.

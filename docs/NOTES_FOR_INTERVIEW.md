@@ -320,3 +320,11 @@ Each entry: **problem → root cause → fix → lesson**.
 8. **Rules live in one pure module.** `TRANSITIONS` (`domain/workflow.py:368`) has one row per action and starting status; `evaluate` (`:494`) adds reasons, resolutions and the approval gate; T-FLOW checks 720 cells against a table typed by hand, and the table equals the seed simulator's independent copy. Resolving a payment item without an approval is 422 `APPROVAL_REQUIRED` (`:515`).
 9. **Honest gaps.** Deactivating a user has no endpoint, so nothing unassigns for it; removing someone with thousands of items is one long transaction; a removal and a claim can deadlock and one is retried; a request for approval is "already pending" before it is "stale" (KNOWN_LIMITATIONS, decisions 35-45).
 10. **Numbers.** 3,325 API + 4 web tests, none skipped, about 350 s. The independent review found four defects, all fixed with tests that fail on the old code.
+
+### Phase 5: collaboration, attention, search (time-boxed)
+
+1. **Built.** Comments (append-only, `commented` event, same transaction), watch, read marker, `/me/attention` (five indexed queries, 10 items, count capped at 100), notifications list and mark-read, `q` search (key jump, full-text, trigram typo tolerance, top 50) and `/items/similar`.
+2. **Key decision: visibility lives in the WHERE clause of every one of those queries**, before the LIMIT (`filter_clauses`, `first_items`, `count_up_to`, `list_notifications`), so a hidden confidential item cannot be listed, ranked, counted or take a place in a top 10 / top 50.
+3. **Second decision: a comment never bumps `version`** (decision 8), so "unread" is an event id, and the read marker is one `INSERT ... SELECT ... ON CONFLICT` that applies visibility and `GREATEST` itself.
+4. **Alternative / what it costs.** A ranked search has no cursor on purpose; "your requests" counts only activity by someone else (decision 46).
+5. **Honest gap.** One test per rule only: no T-VIS property test, query-count guard, EXPLAIN, sabotage or independent review (KNOWN_LIMITATIONS, "Phase 5 was time-boxed").

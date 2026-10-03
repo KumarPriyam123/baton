@@ -4,7 +4,9 @@ Where the project stands, how to run it, and what to know before the next sessio
 
 ## Current state
 
-**Phase 4 (workflow, ownership, approvals) is done. Phase 5 has not started.** Tags: `phase-4-start`, `phase-4-done`.
+**Phase 5 (collaboration, attention, search) is built and time-boxed; see "Phase 5" below for what it did and did not test. Phase 6 has not started.** Tags: `phase-4-start`, `phase-4-done`.
+
+**Phase 5 added** (decision 46): `POST /items/{key}/comments` (key required, `commented` event, author auto-watches, answers `{comment, item}`); `PUT|DELETE /items/{key}/watch`; `POST /items/{key}/read` (upsert of `item_reads.last_read_event_id`); `GET /me/attention` (five sections, 10 items, counts capped at 100); `GET /me/notifications` and `POST /me/notifications/read`; `q` on `GET /items` and `/items/facets` (key jump, else full-text + trigram, top 50, no cursor); `GET /items/similar?team_id&title`; `comment_body` on timeline events; `watching` on the item; `id` on `GET /teams`. New code: `repo/{collab,search,attention,notifications}.py`, `services/comments.py`, `api/routers/collab.py` and `me.py`. Tests: `test_collaboration.py`, `test_search.py`, `test_attention.py`, `test_notifications.py`, and the phase 3 confidentiality test extended. **Not built:** the worker that creates notifications (phase 6), stats and decisions (phase 11). Untested by design: `docs/KNOWN_LIMITATIONS.md`, "Phase 5 was time-boxed".
 
 Repo: https://github.com/KumarPriyam123/baton (private). CI is green on `main` for phase 4 (api, web, hygiene): https://github.com/KumarPriyam123/baton/actions/runs/37141764027
 
@@ -20,7 +22,7 @@ What exists, on top of phases 0-3:
 Verified in this phase: every Done-when item (see `docs/REQUIREMENTS_TRACE.md`), the five sabotage rows (and why two of them needed more tests), the real stack through nginx on port 8081 (migration head 0004, claim, 409, 422 `APPROVAL_REQUIRED`, request, approve, events), an independent review (decision 45: four findings fixed, the rest left with reasons).
 **Still deferred:** `docker compose up` on port 8080 itself (another local project holds it); re-check at the phase 14 clean-clone run.
 
-Not built yet, by design: comments/watch/read, search, attention, notifications, the worker, SSE, the web UI, stats and decisions endpoints.
+Not built yet, by design: the worker (so the notifications table is only filled by the seed), SSE, the web UI, stats and decisions endpoints.
 
 ## Commands
 
@@ -65,7 +67,9 @@ curl -b jar 'localhost:8080/api/v1/items?status=new&sort=updated&limit=5'
 - **Time in SQL:** pass `now` in from Python (never `now()` in SQL) so tests can move the clock. `CommandTx.now` is the command's clock; `restamp()` after a lock wait; a pinned `now` is never restamped.
 - **asyncpg parameter types:** a bind parameter used only inside a `CASE` is inferred as `text`; cast it.
 - **FastAPI:** a dependency argument must not share a name with a path parameter (`key`).
-- **Unknown query parameters on `GET /items` are 400** (decision 29). Phase 5 adds `q`.
+- **Unknown query parameters on `GET /items` are 400** (decision 29). `q` is now allowed, but not together with `sort` or `cursor`.
+- **Tests that read notifications must clear them first:** the seed already fans notifications out to its demo users (`clear()` in `test_notifications.py`).
+- **Python on Windows writes CRLF** when a script opens a file in text mode; use `newline=''` (or the Write/Edit tools) or run `sed -i 's/\r$//'`.
 - **The seed writes `work_items` and `item_events` directly** (decision 7). Application code must use `record_event()`; `tests/unit/test_single_writer.py` enforces it.
 - **ESLint is pinned to 9** until `eslint-plugin-jsx-a11y` supports 10.
 - **Never run two test sessions at once.** `tests/db` rebuilds the `public` schema of the shared test database at session start; a second run (or a subagent running tests while you do) can drop it under the first.
@@ -108,4 +112,4 @@ Read `docs/ENGINEERING_DECISIONS.md` 35-45 before phase 5. In short:
 
 ## Next phase
 
-Phase 5: collaboration, attention, search, dashboard API (SPEC 7, 8 and the comment, watch and read endpoints of SPEC 11). Comments write a `commented` event through `record_event` with the current version (it never bumps). `allowed_actions` already lists `comment` and `watch`.
+Phase 6: the async worker (SPEC 9). It must create the `notifications` rows (fan-out, skip the actor, `ON CONFLICT DO NOTHING` on `(user_id, event_id)`) and call `NOTIFY notifications`; `GET /me/notifications` already reads them through `visibility_clause()`. Consider a `(user_id, id DESC)` index for the full list (KNOWN_LIMITATIONS).

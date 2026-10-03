@@ -114,7 +114,10 @@ async def list_notifications(
 
 
 @router.post(
-    "/me/notifications/read", operation_id="mark_notifications_read", summary="Mark as read"
+    "/me/notifications/read",
+    response_model=MarkedRead,
+    operation_id="mark_notifications_read",
+    summary="Mark as read",
 )
 async def mark_notifications_read(
     body: MarkReadRequest,
