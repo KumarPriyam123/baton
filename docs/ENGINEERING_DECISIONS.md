@@ -1,5 +1,20 @@
 # Engineering decisions
 
+## Top 5 decisions
+
+The five choices that shape the system most. Each row says what I chose, what I turned down, and what
+that costs. The numbered log below has the detail (the number in brackets).
+
+| # | Decision | Alternative I rejected | Trade-off I accepted |
+|---|---|---|---|
+| 1 | **PostgreSQL is the database, the queue, the search engine and the pub/sub** (1): outbox + `SKIP LOCKED`, `tsvector` + `pg_trgm`, `LISTEN/NOTIFY` | Redis, Kafka/Celery, Elasticsearch next to Postgres | A queue and a search index in the same database share its ceiling and its load; ranking is simpler than a search engine's. In return a job or an event can never exist without the change that caused it, and there is one thing to run, back up and explain |
+| 2 | **Concurrency without long locks** (8, 34, 35, 39-42): an atomic conditional `UPDATE` decides a claim; a `version` + `If-Match` decides an edit; approvals are bound to a hash of the content and a material edit invalidates them | Pessimistic "check out" locks held while someone thinks; last write wins; a lock-then-read-then-write claim | The loser of a race gets a 409/412 and has to look at a diff and choose (the conflict dialog). Edits to one hot item serialise on its row lock. The version moves only for decision-relevant fields, which makes the rule harder to state than "every write" (8) |
+| 3 | **Idempotency keys are stored in the same transaction as the change** (31, 34): one key per user action, reused on every retry; a retry replays the first answer | A cache or a separate table written after the commit; client-side de-duplication only | The keys table grows until the cleanup job exists (not built), a replayed 412 can outlive its reason, and every state-changing endpoint carries the extra header and fingerprint check |
+| 4 | **Authorization and workflow are pure server-side modules** (`policy.py`, `workflow.py`), mirrored by one SQL `visibility_clause()` and by database CHECK constraints (I3, I4, I10); the UI renders `allowed_actions` and decides nothing; an item you cannot see is a 404, one you cannot touch is a 403 | Permission checks scattered through handlers and the UI; filtering lists in Python; 403 for everything | Every query that returns items or counts must remember the clause (a parity test, T-VIS, guards it), and the same rule exists twice (Python and SQL) and in the database. In return a missing check fails a test, not a customer |
+| 5 | **One append-only event log** (`item_events`) is the audit trail, the timeline and the source of the outbox (25): one row per change in the same transaction, a trigger rejects UPDATE/DELETE | Full event sourcing (rebuild state from events); a separate audit table; updating rows in place without history | The row and its event are written together (a dual write inside one transaction, checked by `record_event`) rather than derived from each other; `TRUNCATE` is not covered by the trigger (11); history is large |
+
+## Decision log
+
 Changes to the stack or the spec, recorded when they are agreed.
 
 ## 1. Postgres is the queue, the search engine and the pub/sub
@@ -553,3 +568,27 @@ Decided with the phase 5 prompt; none of them changes a SPEC rule, each fills a 
   `Loaded` is keyed by item key and reads it once.
 - **Handoff track motion.** A segment grows in (220 ms) only when it appears after the events first loaded;
   state is adjusted during render, not in an effect. `prefers-reduced-motion` zeroes `--dur-grow`/`--dur-wash`.
+
+## 50. Phase 14 (lean): SPEC text brought in line with the code
+
+At submission the SPEC described three things the code does not do. The code stays; the SPEC says so, in
+place, with "not built in v1" markers, so a reader is never told a behaviour that is not there. Each is
+also in KNOWN_LIMITATIONS.
+
+- **SPEC 10 and 11, live updates.** `GET /stream` (SSE) is not built; the client polls every 10 s
+  (decision 49). A note at the top of section 10 says so and keeps the rest as the design of the SSE
+  replacement; the `/stream` row of the API table is marked. `NOTIFY` is sent but has no listener.
+  `docs/ARCHITECTURE.md` draws what exists.
+- **SPEC 7 and 11, `GET /stats/teams` and `GET /decisions`.** Not built (moved out of phase 5 in
+  HANDOFF, then not reached). Marked in section 7 and in the API table. There is no dashboard or
+  decisions screen.
+- **SPEC 9, cleanup job and fault injection.** The hourly cleanup job is not built, and
+  `FAULT_NOTIFY_FAIL_RATE` is read by `Settings` and refused in prod (decision 2) but the notify handler
+  does not use it. Marked in the job table and the paragraph.
+- **SPEC 13, performance targets.** There is no `docs/PERFORMANCE.md` or `scripts/bench.py`; section 13 now
+  says the targets were not measured.
+- **Already consistent, checked:** search is `GET /items?q=` and `GET /items/facets?q=` (SPEC 8, decision
+  46); `GET /items/similar` and `GET /teams` returning `id` (decision 46); no `POST /teams` (decision 20);
+  the listed error codes (`test_errors.py`).
+- **Not a SPEC fix:** CLAUDE.md still lists SSE in the stack table and `--profile e2e` in Commands; both
+  describe the plan, not the submission. README and TESTING say what runs today.
