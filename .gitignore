@@ -1,0 +1,29 @@
+# secrets and private files
+.env
+.env.*
+!.env.example
+*.pdf
+
+# node / web
+node_modules/
+dist/
+playwright-report/
+test-results/
+coverage/
+*.tsbuildinfo
+
+# python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# editors / os
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
