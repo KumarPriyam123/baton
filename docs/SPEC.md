@@ -449,11 +449,12 @@ BEGIN
   SELECT … FROM work_items WHERE id = :id FOR UPDATE      -- lock order: item first, then approvals
   load actor context; policy check; workflow check
   apply change (version = version + 1, only when a versioned field changed, §6.2)
-  INSERT item_events (one per change; item_version = the new version, or the current
-                      version for commented / sla_breached / duplicate_suggested)
-  UPDATE work_items.last_event_id (and last_activity_at for events a person wrote)
-  INSERT outbox (topic 'item.event', payload {event_ids, request_id})
-  NOTIFY item_changes '{…}'                                -- delivered only if the transaction commits
+  for each event the command writes (one per change), through record_event():
+    INSERT item_events (item_version = the new version, or the current
+                        version for commented / sla_breached / duplicate_suggested)
+    UPDATE work_items.last_event_id (and last_activity_at for events a person wrote)
+    INSERT outbox (topic 'item.event', payload {event_ids: [this event], request_id})
+    NOTIFY item_changes '{…}'                              -- delivered only if the transaction commits
   store idempotency response
 COMMIT
 ```
@@ -547,7 +548,7 @@ RETURNING *;
 
 | Topic / job | Trigger | What it does | Why running it twice is safe |
 |---|---|---|---|
-| `item.event` → notify | every committed change | notifications for assignee, watchers and requester (not the actor) | UNIQUE `(user_id, event_id)` |
+| `item.event` → notify | every committed event (one outbox row per event) | notifications for assignee, watchers and requester (not the actor) | UNIQUE `(user_id, event_id)` |
 | `item.created` → duplicates | item created | finds similar open items (trigram) → `item_similar` + one `duplicate_suggested` event | upsert; event dedupe key `dup:<item_id>` |
 | SLA sweep | every 60 s | `UPDATE work_items SET sla_breached_at = now() WHERE due_at < now() AND sla_breached_at IS NULL AND status NOT IN ('resolved','closed') RETURNING …` → event + notifications | the `IS NULL` guard makes the update happen once per item |
 | Cleanup | hourly | delete idempotency keys > 24 h, expired sessions, `done` outbox rows > 7 days | deletes are naturally idempotent |

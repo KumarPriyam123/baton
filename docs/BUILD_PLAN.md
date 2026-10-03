@@ -303,7 +303,8 @@ Commands (app/services/commands.py), each one command_tx with the SPEC §6.4 sha
 - transition: block, unblock, resolve, reopen, close, withdraw — reasons and resolutions per the table; reopen target rule.
 - transfer per SPEC §4.3 (assignee kept only if a member/lead of the target; pending approval cancelled; approved invalidated; key unchanged; prev_team_id in NOTIFY payload).
 - approvals: request (stores subject_hash = sha256 of team_id, type, title, description), decision (If-Match REQUIRED; four-eyes; lead of the item's team), cancel.
-- In PATCH (from phase 3): when a material field changes, invalidate per SPEC §4.4 in the same transaction.
+- In PATCH (from phase 3): when a material field changes, invalidate per SPEC §4.4 in the same transaction. This replaces the temporary 409 of phase 3 (ENGINEERING_DECISIONS 27) and re-adds `edit_text`/`edit_type` to `allowed_actions` for items with an approval.
+- Already built in phase 3 (do not redo): `type_defaults`, `plan_edit`, `required_actions` and `next_step` in `workflow.py`, and `allowed_actions` for the field-edit actions (`services/items.py`). Phase 4 adds the transition table and merges the workflow actions into the same list.
 - Map the DB four-eyes and one-pending constraints to 403/409 in case policy is ever bypassed.
 
 Also: a test helper that replays seeded histories through workflow.evaluate.
@@ -332,6 +333,7 @@ Also: a test helper that replays seeded histories through workflow.evaluate.
 
 **Done when**
 - [ ] Removing or demoting a team member unassigns their open items in the same transaction (SPEC 4.3b), replacing the phase 2 refusal in `app/services/teams.py` (ENGINEERING_DECISIONS 14)
+- [ ] A PATCH of a material field invalidates a pending or approved approval in the same transaction (replaces the temporary 409 from decision 27)
 - [ ] All tests pass, and every sabotage row was observed red
 - [ ] `GET /items/{key}` returns correct `allowed_actions` and `next_step` for each demo persona on a sample of items
 - [ ] Independent review (see top of file) run and confirmed findings fixed
@@ -348,28 +350,30 @@ Also: a test helper that replays seeded histories through workflow.evaluate.
 **Goal:** everything a user needs to understand an item and find work, all through the visibility rule.
 
 ```text
-Implement SPEC §7, the search part of §8, and these endpoints from §11: comments, watch, read, me/attention, me/notifications (+ read), items/similar, stats/teams, decisions.
+Implement SPEC §7 (attention only), the search part of §8, and these endpoints from §11: comments, watch, read, me/attention, me/notifications (+ read), items/similar.
+
+Scope change: GET /stats/teams and GET /decisions are NOT built here. They are deferred to phase 11 together with the dashboard and decisions screens.
 
 - Comments: idempotency key required; append-only; writes a `commented` event (data: comment_id) via record_event; the author auto-watches.
 - item_reads: POST /items/{key}/read upserts last_read_event_id (the item's current last_event_id); item DTO includes unread_since_event_id (the caller's last_read_event_id, null if never opened).
 - Attention: one indexed query per section with LIMIT, counts capped at 100.
 - Search: key-shaped q → exact key; else websearch_to_tsquery + ts_rank, plus trigram similarity on title; top 50; visibility applied INSIDE the query.
 - Similar: trigram similarity > 0.35, open items in the same team, top 5.
-- Stats and decisions: computed with the visibility clause, so a member and a lead can see different numbers.
+- (Stats and decisions moved to phase 11; when built they use the visibility clause, so a member and a lead see different numbers.)
 - Timeline endpoint returns events with the comment body joined for `commented` events.
 ```
 
 **Tests**
-- **T-VIS extended:** search, facets, attention, stats, decisions, similar and notifications never return or count an item the caller can't view (property test over all demo users).
+- **T-VIS extended:** search, facets, attention, similar and notifications never return or count an item the caller can't view (property test over all demo users). Stats and decisions join it in phase 11.
 - Attention: each section's rule, using fixtures built for it (an item that should and one that shouldn't appear).
 - Search: key jump; a title match ranks above a description-only match; a typo ("refnd") still finds "refund" via trigram.
 - Comments can't be updated or deleted (no route; DB-level check on the events side already exists).
 - Query-count guard on attention and list.
 
 **Done when**
-- [ ] The confidential-item HTTP test from phase 3 also covers search (`q`), attention, stats, decisions and notifications
+- [ ] The search endpoint (`q` on `GET /items`) joins the phase 3 HTTP confidentiality test (`tests/integration/test_items_create_read.py`), together with attention and notifications: a non-lead Compliance member never sees the confidential item there. Remove `q` from the "unknown parameter" refusal (ENGINEERING_DECISIONS 29).
 - [ ] All tests pass on the demo seed
-- [ ] A lead and a member of Payments get different `stats/teams` numbers when confidential items exist, and both match what they can list
+- [ ] (Moved to phase 11) A lead and a member of Payments get different `stats/teams` numbers when confidential items exist, and both match what they can list
 
 **Failure modes guarded**
 - One query that skips the visibility clause (search, counts and dashboards are where this usually leaks).
@@ -563,6 +567,8 @@ Implement DESIGN §4.4, §5, §6 and SPEC §6.6.
 
 ```text
 Implement DESIGN §4.6–4.11.
+
+Backend first (moved here from phase 5): GET /stats/teams (SPEC §7 dashboard) and GET /decisions (decision log), both through visibility_clause(), with a query-count guard and the T-VIS property test extended to them.
 
 - Dashboard: org figures, team table with open-by-priority bars, unowned, overdue, awaiting approval, median age, 14-day created/resolved sparkline; every number links to the filtered queue. Follow the dataviz rules (one hue per series, direct labels).
 - Decision log with team and kind filters.

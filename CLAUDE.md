@@ -79,7 +79,7 @@ Everything runs in containers so it works the same on Windows, macOS and Linux.
 | API tests | `docker compose -f compose.yaml -f compose.test.yaml run --rm api-test` |
 | Web unit tests | `docker compose -f compose.yaml -f compose.test.yaml run --rm web-test` |
 | End-to-end | `docker compose -f compose.yaml -f compose.test.yaml --profile e2e up --abort-on-container-exit` |
-| Large seed | `docker compose run --rm seed python -m scripts.seed --size large --reset` |
+| Large seed (separate database, see hazards) | `docker compose exec db createdb -U baton baton_large` once, then `L=postgresql+asyncpg://baton:baton@db:5432/baton_large; docker compose run --rm -e DATABASE_URL=$L migrate; docker compose run --rm -e DATABASE_URL=$L seed python -m scripts.seed --size large --reset` |
 | New migration | `docker compose run --rm migrate alembic revision -m "<msg>"` |
 | Regenerate API types | `cd web && npm run gen:api` (API must be running) |
 | Two workers | `docker compose up --scale worker=2` |
@@ -126,6 +126,7 @@ Everything runs in containers so it works the same on Windows, macOS and Linux.
 
 ## Environment hazards (Kumar's machine)
 
+- **The large seed goes into its own database, `baton_large`, never the dev database `baton`.** `seed --reset` TRUNCATEs everything it can reach, so pointing it at `baton` destroys the demo data (it happened once, in phase 3). Point `DATABASE_URL` at `baton_large` as in the Commands table; run API or benchmarks against it with the same override.
 - **Windows + Git Bash.** `.gitattributes` forces LF; a CRLF entrypoint fails inside Linux containers with `/bin/sh^M: not found`. Use `/c/Users/...` paths in Git Bash, not backslashes.
 - **No `make`.** Use the `docker compose` commands above; don't add Makefile-only workflows.
 - **Port 8080** must be free; only `web` publishes a port.
