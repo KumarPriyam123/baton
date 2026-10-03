@@ -288,6 +288,8 @@ async def test_confidential_item_is_404_for_a_non_lead_member_and_absent_from_li
     assert sum(member_facets.values()) == len(member_list)
     assert sum(lead_facets.values()) == len(lead_list)
     assert len(lead_list) > len(member_list)
+    seen = await hidden_from_non_lead_everywhere(app_settings, seeded, item)
+    assert seen == {"member": [], "lead": [item["key"]]}  # phase 5: search, attention, bell
     farah = await scalar(seeded.url, "SELECT id FROM users WHERE email = $1", FARAH)
     assert len(member_list) == await scalar(
         seeded.url,
@@ -295,6 +297,38 @@ async def test_confidential_item_is_404_for_a_non_lead_member_and_absent_from_li
         "AND (NOT i.confidential OR i.assignee_id = $1 OR i.requester_id = $1)",
         farah,
     )
+
+
+async def hidden_from_non_lead_everywhere(
+    settings: Settings, seeded: SeededDatabase, item: dict[str, Any]
+) -> dict[str, list[str]]:
+    """Where else could the confidential item leak? Search, the attention sections and the
+    notifications of a CMP member who is not a lead, against a lead who may see it. Returns the
+    keys each of them finds, over all three at once."""
+    event_id = item["last_event_id"]
+    for email in (FARAH, ISHAAN):  # a notification each, as the worker (phase 6) would fan out
+        await execute(
+            seeded.url,
+            "INSERT INTO notifications (user_id, item_id, event_id, kind) "
+            "SELECT u.id, $2, $3, 'created' FROM users u WHERE u.email = $1",
+            email,
+            uuid.UUID(item["id"]),
+            event_id,
+        )
+
+    async def seen_by(email: str) -> list[str]:
+        async with signed_in_as(settings, email) as client:
+            found = {
+                i["key"]
+                for i in (await client.get(ITEMS, params={"q": item["title"]})).json()["items"]
+            }
+            attention = (await client.get("/api/v1/me/attention")).json()["sections"]
+            found |= {i["key"] for s in attention for i in s["items"]}
+            bell = (await client.get("/api/v1/me/notifications")).json()["items"]
+            found |= {n["item_key"] for n in bell}
+        return sorted(found & {item["key"]})
+
+    return {"member": await seen_by(FARAH), "lead": await seen_by(ISHAAN)}
 
 
 async def test_the_assignee_of_a_confidential_item_sees_it_but_other_teams_leads_do_not(

@@ -649,6 +649,38 @@ async def list_items(
     return page, encode_item_cursor(sort, page[-1]) if more and page else None
 
 
+async def first_items(
+    conn: AsyncConnection,
+    ctx: ActorContext,
+    clauses: Sequence[ColumnElement[bool]],
+    keys: Callable[[Any], Sequence[ColumnElement[Any]]],
+    limit: int,
+) -> list[ItemRecord]:
+    """The first `limit` items the actor may see that match `clauses`, in the order of `keys`
+    (a function of the columns, like `Sort.keys`). One statement, filtered and limited before the
+    joins of the item view: the attention sections are built from this (SPEC 7)."""
+    window = (
+        _page(visibility_clause(ctx), *clauses).order_by(*keys(wi)).limit(limit).subquery("page")
+    )
+    query = _item_query(ctx, window).order_by(*keys(window.c))
+    return [ItemRecord.from_row(r) for r in (await conn.execute(query)).all()]
+
+
+async def count_up_to(
+    conn: AsyncConnection, ctx: ActorContext, clauses: Sequence[ColumnElement[bool]], cap: int
+) -> int:
+    """How many visible items match, never counting past `cap`: the LIMIT is inside, so the cost
+    stays bounded however much history there is (SPEC 7)."""
+    capped = (
+        sa.select(sa.literal(1))
+        .select_from(schema.work_items)
+        .where(visibility_clause(ctx), *clauses)
+        .limit(cap)
+        .subquery()
+    )
+    return int((await conn.execute(sa.select(sa.func.count()).select_from(capped))).scalar_one())
+
+
 async def search_items(
     conn: AsyncConnection, ctx: ActorContext, filters: ItemFilters, *, limit: int, now: datetime
 ) -> list[ItemRecord]:
