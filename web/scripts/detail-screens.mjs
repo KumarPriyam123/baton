@@ -6,7 +6,10 @@ import { chromium } from "@playwright/test";
 const base = process.env.BASE_URL ?? "http://localhost:8080";
 const who = process.env.AS ?? "Priya Nair";
 const theme = process.env.THEME ?? "light";
-const targets = (process.env.KEYS ?? "").split(",").filter(Boolean).map((t) => t.split(":"));
+const targets = (process.env.KEYS ?? "")
+  .split(",")
+  .filter(Boolean)
+  .map((t) => t.split(":"));
 const out = "test-results/screens";
 mkdirSync(out, { recursive: true });
 

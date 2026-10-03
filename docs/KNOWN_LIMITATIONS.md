@@ -186,6 +186,47 @@ screenshots were not reviewed (one dark queue screenshot was looked at). No axe 
 exists but nothing writes to it yet. Two React Compiler lint warnings remain (`react-hook-form` `watch` and
 TanStack Virtual are not memoisable; harmless, the compiler skips those components).
 
-**Behaviour to know:** the detail pane is a stand-in (decision 48). Changing a filter keeps the previous
-rows on screen, dimmed, until the new ones arrive. The e2e test and my checks left a few
-`E2E ...` requests in the dev database.
+**Behaviour to know:** the detail pane is a stand-in (decision 48; replaced in session B, below). Changing a
+filter keeps the previous rows on screen, dimmed, until the new ones arrive. The e2e test and my checks left
+a few `E2E ...` requests in the dev database.
+
+## Frontend session B (phase 10) was lean: what is missing, and what is unverified
+
+**Not built:**
+- **SSE (phase 7).** Live updates are 10 s polling (decision 49): a change by someone else shows up within
+  about 10 s (measured 9 s), not 2 s, and there is no 250 ms coalescing test, no `resync`, and no
+  "N items changed, Refresh order" bar on the list. Lists refetch wholesale, so a list page older than a
+  just-applied mutation can show old data until the next poll.
+- **Editing most properties.** Only priority (optimistic) and watch are editable inline, and the
+  description. Title, type, due date, confidential and requires-approval have no editor even though
+  `allowed_actions` offers them; the Properties rows are read-only.
+- **Shortcuts on the detail:** `m` (comment box) only. `a`, `p` then a digit and `s` are not wired.
+- **Names for ids.** Event data names people and teams by id. Names come from actors, the item's people
+  and the team's first 50 members; a former member who never acted on the item shows as "someone".
+  A team with more than 50 members is not paged for the assignee picker.
+- **Watchers list.** `ItemOut` has only `watching` for me, so Properties shows my own watch state, not
+  the list DESIGN 4.4 describes.
+- **Approval details.** The panel's text comes from `item.approval` plus the latest approval event: the
+  server sends no approval note, hash or version. "Approved against which version" is not shown.
+- **Drawer at 1024-1279 px** reuses the session A overlay; not re-checked. No 375 px layout, no axe, no
+  notifications, dashboard, decisions, teams or jobs screens, no command palette (as agreed).
+- **Not run:** the third, fourth and fifth Playwright scenarios of BUILD_PLAN phase 10 (disjoint edit,
+  approve after edit, live) have no Playwright test. Disjoint edit is a unit test. A throwaway script
+  drove approve-after-a-priority-edit (412, "Show changes", "Approve this version", approved) and a live
+  priority change (visible after 9 s, no reload) and I looked at the screenshots; **approve after a
+  *description* edit was not driven** (the edit withdraws the approval, so Approve disappears after the
+  412; the withdrawn panel was seen, but not that exact sequence). No sabotage checks and no
+  independent review, by instruction.
+
+**Approximate on purpose:** the stale-approve check uses the version in the cache when the button is
+clicked, so an approver who already sees a change (the poll arrived first) is not stopped. The server still
+refuses an approval whose content changed (the edit withdraws it). The primary action is the first
+`allowed_actions` entry in a preference order per `next_step.kind` (`actions.ts`); a team that wants a
+different default changes that table, not the workflow.
+
+**Unverified:** dark mode was reviewed on two screens (blocked, awaiting approval) only; the other
+statuses in dark, the 1024-1279 px drawer, long timelines (more than 100 events, "Show earlier events")
+and a track with the "+N" collapsed middle were not looked at (the collapse has no test). Screen reader
+output was not heard; the `aria-live` regions are written to (polite for live changes, assertive for the
+conflict dialog) and the track has an `ol` with the same facts, but nothing was run in a reader.
+Two React Compiler lint warnings from session A remain.

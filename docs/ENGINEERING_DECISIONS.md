@@ -512,3 +512,44 @@ Decided with the phase 5 prompt; none of them changes a SPEC rule, each fills a 
   the repo's TypeScript 6 (it only uses the compiler API). `npm run gen:api` is a Node script because npm
   runs scripts through cmd.exe on Windows (`${VAR:-x}` fails); `OPENAPI_URL` overrides the default
   `http://localhost:8080/api/openapi.json`.
+
+## 49. Frontend session B (phase 10, lean): item detail, conflicts, polling
+
+- **Two dependencies added, both inside the locked stack.** `@radix-ui/react-popover` (DESIGN 4.4 asks
+  for "a small popover with a required text field"; the stack line is "Radix UI") and `diff` (jsdiff, named
+  in the stack's Content row, for the word-level conflict diff).
+- **Live updates are 10 s polling, not SSE.** Phase 7 is not built; BUILD_PLAN allows it. `useLiveUpdates`
+  keeps the SSE interface (`{ itemKey }` in, caches kept fresh, nothing out): it refetches the open item and
+  its timeline plus the *rendered* lists, and stops while the tab is hidden. No 250 ms coalescing: one
+  tick is one refetch. Costs: up to 10 s of lag (measured 9 s), and a poll per open tab.
+- **The item query merges.** `itemQuery`'s function returns `mergeItem(cached, fetched)`, so a slow poll that
+  lands after a mutation response cannot roll the screen back (I13). Lists still replace wholesale on
+  refetch; a list page older than a just-applied mutation can briefly show old data until the next poll.
+- **A field edit sends the version the editor *started from*, not the cache's.** The description draft
+  stores `baseVersion`; `If-Match` uses it. Reading the cache instead would make the edit succeed after a
+  poll brought in someone else's change, which is a silent lost update. A 412 goes through
+  `runWithRebase`: no overlap between my fields and `changes_since` fields (read from each event's
+  `data` keys) means resend on `error.current.version` with a **new** idempotency key (decision 34) and
+  say "Saved. Asha's change to priority was kept."; overlap, or a 412 without `changes_since`, opens the
+  ConflictDialog. "Save my version" resends on the server's version; Esc keeps the draft.
+- **The server decides when a reason is needed.** Lowering priority is optimistic; on 422
+  `REASON_REQUIRED` the optimistic value is rolled back and a reason popover opens. The UI does not know
+  "P0/P1". Likewise `APPROVAL_REQUIRED` on resolve shows "Request approval" instead of the UI guessing.
+- **Which actions appear is `allowed_actions`; how they look is `features/item/actions.ts`.** Labels, the
+  form each one collects, and the primary (first preference for `next_step.kind` that the server allows).
+  A test runs every pair of actions through `barModel` and checks nothing outside `allowed_actions`
+  is ever offered. The close form hides "resolution" when the item is `resolved` (form shape, not a rule).
+- **Stale approve.** `approve` uses the cache version at click time, so an approver whose screen already
+  shows the change (a poll arrived) approves what they can see; one who clicks before the poll gets 412
+  and "changed since you opened it" with the events and a word diff, then "Approve this version" (the
+  retry carries the version from `error.current`). A material edit also withdraws the approval, so the
+  button disappears after the 412 and the panel says nothing is left to approve.
+- **Names for ids.** `assigned`/`unassigned`/`transferred` events carry user and team **ids**. The track
+  and timeline resolve them from actors, the item's people, the team's first 50 members and `/teams`.
+  Someone who left the team and never acted on the item reads "someone" (KNOWN_LIMITATIONS).
+- **Timeline order and bounds.** Events are fetched newest first (`order=desc`, 100 a page), at most five
+  pages (500 events); the track needs the whole ownership history. The unread divider uses
+  `unread_since_event_id` as it was when the item opened (the open itself clears it server-side), so
+  `Loaded` is keyed by item key and reads it once.
+- **Handoff track motion.** A segment grows in (220 ms) only when it appears after the events first loaded;
+  state is adjusted during render, not in an effect. `prefers-reduced-motion` zeroes `--dur-grow`/`--dur-wash`.

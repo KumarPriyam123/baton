@@ -85,7 +85,7 @@ Real stack through nginx on port 8081 (migration head 0004): claim, a losing cla
 | E4 | Who is responsible | owner + team, handoff track | 4, 10 | detail screenshot | ◐ phase 4: owner, claim, assign, release, transfer and the `assigned`/`unassigned`/`transferred` events; UI in 10 |
 | E5 | What has happened previously | append-only timeline, decisions with reasons | 3, 5, 10 | event invariant test | ◐ phase 3: every change is an event (`record_event`), timeline endpoint `GET /items/{key}/events`; comments in phase 5 |
 | E6 | What requires attention next | `next_step` on every item; Inbox sections | 4, 5, 9 | next_step tests | ◐ phase 3: `next_step` implemented (SPEC 4.5, unit-tested) and returned on every item; Inbox in 5 and 9 |
-| E7 | Different users on the same item at about the same time behave sensibly | CB1, CB2, CB3, CB5, CB8 | 3, 4, 10 | concurrency tests; two-user E2E | ◐ phases 3-4: CB1, CB2, CB3, CB5 proven on the server; UI in 10 |
+| E7 | Different users on the same item at about the same time behave sensibly | CB1, CB2, CB3, CB5, CB8 | 3, 4, 10 | concurrency tests; two-user E2E | ◐ phases 3-4: CB1, CB2, CB3, CB5 proven on the server; fe-b: two-browser Playwright claim race and stale description edit pass (disjoint edit is a unit test; approve-after-*description*-edit and live are not Playwright-tested, KNOWN_LIMITATIONS) |
 
 ## Teams, identity and access
 
@@ -100,16 +100,16 @@ Real stack through nginx on port 8081 (migration head 0004): claim, a losing cla
 
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
 |---|---|---|---|---|---|
-| C1 | Users collaborate around work items | comments, watchers, notifications | 5, 6, 10 | comment tests; E2E | ☐ |
-| C2 | Understand how an item evolved: responsibility, priority, workflow | typed events with from/to; handoff track; Decisions filter | 3, 4, 10 | event tests; screenshot | ◐ phase 3: typed events with from/to and reasons for decisions; handoff events in phase 4 |
+| C1 | Users collaborate around work items | comments, watchers, notifications | 5, 6, 10 | comment tests; E2E | ◐ fe-b: composer with optimistic "Sending…", same key on Retry, event inserted on success (driven by hand; no automated UI test); notifications UI skipped |
+| C2 | Understand how an item evolved: responsibility, priority, workflow | typed events with from/to; handoff track; Decisions filter | 3, 4, 10 | event tests; screenshot | ◐ phase 3: typed events with from/to and reasons for decisions; handoff events in phase 4; fe-b: handoff track (log-width segments, dashed unowned, "+N" fold, hover/focus text, sr-only list) and All/Comments/Decisions timeline, reviewed in screenshots |
 | C3 | Important actions don't silently disappear | one write path (`record_event`), same transaction, append-only trigger, reasons required for decisions | 1, 3 | event invariant test; trigger test | ◐ phases 1 and 3: append-only trigger; `record_event` writes event, stamp, outbox row and NOTIFY together; single-writer scan; the version check refuses a wrong version; reasons for priority lowering and approval off |
 
 ## Concurrent usage
 
 | ID | Brief says | Baton's answer | Phase | Proof | Status |
 |---|---|---|---|---|---|
-| K1 | Two users try to take responsibility for the same work | atomic conditional claim | 4 | T-CLAIM; E2E claim race | ◐ phase 4: T-CLAIM proven (service and HTTP); E2E in 13 |
-| K2 | One user views information another just changed | live updates; version guard; stale banner; If-Match on intent-dependent actions | 3, 7, 10 | SSE tests; E2E live update | ◐ phase 3: ETag, version guard on the server side; SSE in phase 7 |
+| K1 | Two users try to take responsibility for the same work | atomic conditional claim | 4 | T-CLAIM; E2E claim race | ◐ phase 4: T-CLAIM proven (service and HTTP); fe-b: Playwright, two contexts released together: one "Assigned to you", the other "took PAY-nnn", both end on one owner (`e2e/detail-concurrency.spec.ts`) |
+| K2 | One user views information another just changed | live updates; version guard; stale banner; If-Match on intent-dependent actions | 3, 7, 10 | SSE tests; E2E live update | ◐ phase 3: ETag, version guard on the server side; fe-b: item refetch merges by (version, last_event_id), 10 s polling instead of SSE (a priority change by another user showed after 9 s, driven by hand, no Playwright test), change notice + wash + aria-live, draft banner, stale-approve review; SSE in phase 7 |
 | K3 | Multiple updates within a short period | row lock + versions (no lost updates); per-item client mutation queue; event coalescing | 3, 9, 10 | T-STALE; vitest scope test | ◐ phase 3: row lock + versions proven (10 edits on one version: 1 wins); fe-a: `useCommand` `scope: item:<id>` unit-tested (two commands run in order, second with the new `If-Match`); event coalescing in 10 |
 | K4 | A user repeats an action, unsure if the first succeeded | idempotency keys in the same transaction; same key on retries | 3, 9 | T-IDEM; E2E double-submit | ◐ phase 3: T-IDEM proven on the server; fe-a: one key per action reused by every retry (unit-tested) and Playwright double-click with the first response dropped gives one item and an `Idempotent-Replayed` answer; item commands other than create and claim are phase 10 |
 | K5 | Handle at least some deliberately | all four above | — | TESTING.md | ☐ |
@@ -166,7 +166,7 @@ Real stack through nginx on port 8081 (migration head 0004): claim, a losing cla
 | CB5 | (beyond the examples) approvals bound to content | subject hash + invalidation | T-APPROVE-RACE | ◐ phase 4 proven (T-APPROVE-RACE, 50 rounds); demo in 10 |
 | CB6 | Authorization at the resource level | confidential, requester, four-eyes, 404 | T-VIS | ◐ phases 2 and 3: SQL and Python agree (T-VIS); list, facets and events checked over HTTP; search, attention and notifications in phase 5 |
 | CB7 | Reliable asynchronous processing | outbox + SKIP LOCKED + idempotent handlers | T-OUTBOX | ◐ phase 6: `test_worker.py::test_two_runners_against_500_jobs_do_each_side_effect_exactly_once` |
-| CB8 | Reconciling optimistic frontend state with server decisions | version merge, scopes, rebase, rollback | T-RECONCILE + E2E | ☐ |
+| CB8 | Reconciling optimistic frontend state with server decisions | version merge, scopes, rebase, rollback | T-RECONCILE + E2E | ◐ fe-b: rebase disjoint vs overlapping, resend limit, ConflictDialog choices send the right request, `allowed_actions` drives the bar (18 Vitest) + 2 Playwright; coalescing test not written (polling, decision 49) |
 | CB-P | Be prepared to explain them | DEMO_SCRIPT.md | rehearsal done | ☐ |
 
 ## Submission

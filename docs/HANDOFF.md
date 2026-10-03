@@ -4,7 +4,9 @@ Where the project stands, how to run it, and what to know before the next sessio
 
 ## Current state
 
-**Frontend session A (phases 8 and 9, lean) is done on top of phase 6. Phase 7 (SSE) and phase 10 (item detail) have not started.** Tags: `phase-4-done`, `phase-6-done`, `fe-a-done`.
+**Frontend session B (phase 10, lean) is done on top of session A. Phase 7 (SSE) has not started.** Tags: `phase-4-done`, `phase-6-done`, `fe-a-done`, `fe-b-done`.
+
+**Frontend session B added** (decision 49; limits in KNOWN_LIMITATIONS "Frontend session B"). `web/src/features/item/`: `ItemDetail` (the right-hand pane and `/items/:key`; `Loaded` is keyed by item), `HandoffTrack` + `track.ts` (pure builder), `ActionBar` + `actions.ts` (labels, forms and primary from `next_step`; buttons only from `allowed_actions`) + `useItemActions` (one `useCommand` for every workflow action), `Properties` (optimistic priority and watch), `Description` (local draft in localStorage, banner, `ConflictDialog`), `useSaveFields` (PATCH + `lib/rebase.ts`), `ApprovalPanel` (+ the stale-approve review), `Timeline` (filters, unread divider, optimistic composer), `names.ts`. `lib/`: `rebase.ts`, `eventText.ts`, `useLiveUpdates.ts` (10 s polling, hidden-tab pause, SSE-shaped interface), `announce.ts` (polite and assertive regions in the shell). `components/ui`: `Popover`, `DiffView`, `PriorityGlyph`, `Markdown`. `itemQuery` now merges by `(version, last_event_id)`. Tests: 38 Vitest (18 new: `rebase`, `Description` 412 flow, `actions`) and 3 Playwright (`create-double-submit`, `detail-concurrency`: claim race, stale edit). Screenshots: `node scripts/detail-screens.mjs` (`KEYS="PAY-88:new,..."`, `THEME=dark`). **Not built:** SSE, inline editing of title/type/due/confidential/requires-approval, notifications/dashboard/decisions/teams/jobs screens, command palette, axe, 375 px.
 
 **Frontend session A added** (decision 48; limits in KNOWN_LIMITATIONS "Frontend session A"). `web/src`: `styles/tokens.css` (both themes, avatar hues) + Tailwind v4 mapping in `globals.css`; `lib/api.ts` (ApiError from problem+json, CSRF on unsafe methods and one retry on `CSRF_FAILED`, 401 handler), `api/generated.ts` (from OpenAPI), `api/queries.ts` and `keys.ts`; `lib/itemCache.ts` (`mergeItem`, `upsertItem`, `removeItem`), `lib/useCommand.ts`, `lib/filters.ts` (zod URL filters), `lib/errors.ts` (SPEC 12 copy); `app/` (router, providers, shell with rail, top bar, shortcuts: `j k Enter Esc / c g-i g-q`); `features/auth` (login with demo accounts), `inbox`, `queue` (virtualised list, filter bar with facet counts, search, detail stand-in, "Assign to me"), `create` (New request dialog); `components/ui` (Strip, Button, Field, Menu, Dialog, states, avatar). Tests: 20 Vitest (`itemCache`, `useCommand`, `filters`) and `web/e2e/create-double-submit.spec.ts`. Checked through nginx by hand (see NOTES). **Not built:** `/dev/ui`, command palette, dashboard, decisions, teams, jobs, notifications screens, SSE, axe.
 
@@ -35,7 +37,7 @@ Not built yet, by design: the worker (so the notifications table is only filled 
 | Start everything | `docker compose up --build` (http://localhost:8080; if taken, `WEB_PORT=8081` in `.env` or the shell) |
 | API tests | `docker compose -f compose.yaml -f compose.test.yaml run --rm api-test` (about 165 s) |
 | One test file | `... run --rm api-test pytest tests/integration/test_items_patch.py -q` |
-| Web unit tests | `docker compose -f compose.yaml -f compose.test.yaml run --rm web-test` (20 tests, about 4 s; add `--build` after dependency changes) |
+| Web unit tests | `docker compose -f compose.yaml -f compose.test.yaml run --rm web-test` (38 tests, about 9 s; add `--build` after dependency changes) |
 | Playwright (host) | stack up, then `cd web && BASE_URL=http://localhost:8081 PW_CHANNEL=chrome npx playwright test` (omit `PW_CHANNEL` to use Playwright's own browser after `npx playwright install chromium`) |
 | Screenshots for design review | `cd web && BASE_URL=http://localhost:8081 PW_CHANNEL=chrome node scripts/screenshots.mjs` (`AS="Asha Rao"`, `THEME=dark`); output in `web/test-results/screens` |
 | Regenerate API types | stack up, then `cd web && OPENAPI_URL=http://localhost:8081/api/openapi.json npm run gen:api` |
@@ -122,5 +124,7 @@ Read `docs/ENGINEERING_DECISIONS.md` 35-45 before phase 5. In short:
 - Expression indexes for `COALESCE(due_at, 'infinity')` if EXPLAIN on `baton_large` shows the sort (decisions 10 and 32); `scripts/bench.py` against `baton_large`.
 
 ## Next phase
+
+Either phase 7 (below) or the rest of the frontend (phase 11 screens). Phase 7 replaces the body of `lib/useLiveUpdates.ts` (same interface) and should add the 250 ms coalescing test; the polling stays as the fallback.
 
 Phase 7: live updates (SPEC 10): `GET /stream` (SSE) fed by `LISTEN item_changes` and `LISTEN notifications`, filtered with the visibility rule per client. Consider a `(user_id, id DESC)` index for the full notification list (KNOWN_LIMITATIONS).

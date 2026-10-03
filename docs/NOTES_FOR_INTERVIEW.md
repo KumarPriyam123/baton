@@ -275,6 +275,37 @@ Each entry: **problem → root cause → fix → lesson**.
 - Port 8080 is still held by an unrelated container; the stack ran on `WEB_PORT=8081`.
 - A dialog that centres with `translate(-50%, -50%)` jumps when its entrance animation also sets `transform`; the overlay centres it with grid instead.
 
+### Frontend session B (phase 10, lean)
+
+**1. The action popover opened and closed in the same frame**
+- Problem: choosing "Block" from the More menu showed nothing; the smoke script timed out waiting for the reason box.
+- Root cause: Radix returns focus to the menu's trigger when the menu closes. The trigger is outside the popover, so the popover read it as a click outside and closed itself.
+- Fix: the popover ignores outside interaction that lands inside the action bar (`data-popover-anchor`). Found only by driving the real page; the unit tests mount the bar but never open a menu and then a popover.
+- Lesson: two Radix layers handing focus to each other need one explicit rule about who counts as "outside".
+
+**2. The timeline did not move after my own action**
+- Problem: after "Assign to me" the track and timeline still showed the old history until the next 10 s poll.
+- Root cause: `useCommand` merges the returned item (new `last_event_id`) but nothing told the events query that it was behind.
+- Fix: the detail watches `item.last_event_id` and invalidates the events query when it changes, for my actions and for polls alike.
+
+**3. An edit made on an old view would have won silently**
+- Problem to avoid: the description editor sent the cache's version. After a poll brought in Asha's rewrite, Priya's Save carried the new version and overwrote it with no dialog.
+- Fix: the draft remembers the version it started from and sends that in `If-Match`. The Playwright stale-edit test depends on it: B saves, A saves from the old view, 412, dialog with a diff.
+
+**4. `limit=100` on the members list was a 400**
+- Problem: names for ids were all "someone". The page showed nothing wrong; the network log showed `VALIDATION_FAILED`.
+- Root cause: directories allow at most 50 (`MAX_LIMIT`), events and items allow 100. I copied the wrong number.
+- Fix: 50. Lesson: read the status of every request in the smoke run, not only whether the page rendered.
+
+**5. Smaller ones**
+- Events carry user and team ids, not names (assigned/unassigned/transferred); names are resolved client-side (decision 49).
+- Seeded comment events carry only `data.excerpt`, not `comment_body`; the timeline showed empty comments until it fell back to the excerpt. Found in the first screenshot.
+- Self-claims read "Asha assigned this to Asha" until `describeEvent` compared actor and assignee.
+- `@testing-library/user-event` is not installed (and adding it is a new dependency), so the tests use `fireEvent`.
+- The lint rules for React Compiler forbid reading refs during render and calling `setState` in an effect; the track's "already there" set is adjusted during render, and the live-change notice (a real subscription) carries a local disable with the reason.
+- `eslint .` fails on the `.mjs` scripts (no type information for them) before and after my change; I linted `src` and `e2e`.
+- Heredocs with apostrophes broke in Git Bash again (fourth time); test files went through the Write tool.
+
 ## Explain this phase
 
 ### Phase 0: foundation
@@ -370,3 +401,12 @@ Each entry: **problem → root cause → fix → lesson**.
 4. **The screens never decide rules.** The strip shows `next_step` and an action only when `allowed_actions` has it; filters live in the URL and are validated by zod, bad values dropped one by one; lists are keyset pages, never loaded whole.
 5. **Proved by.** 20 Vitest tests (`mergeItem`, cache upsert and removal, key and `If-Match` reuse across retries, queued commands in order with the new version, URL round trip) and one Playwright test that drops the first response of a create and still ends with exactly one item and a replay header. I also drove the real stack through nginx: login and return path, `j`/`k`/Enter/Esc, `c`, `/`, typo search with marked words, key jump, empty and 404 states, sign out, and a live claim.
 6. **Honest gap.** No component gallery, palette, axe or large-seed scroll check, and the detail pane is a stand-in until phase 10 (KNOWN_LIMITATIONS, "Frontend session A").
+
+### Frontend session B: phase 10, item detail (lean)
+
+1. **Built.** The real detail screen: header, handoff track with its accessible list, an action bar rendered only from `allowed_actions`, reason popovers, approval panel and the stale-approve review, properties (optimistic priority and watch), a description editor with a local draft, a timeline with filters, an unread divider and an optimistic composer, and 10 s polling.
+2. **Key decision: the editor sends the version it started from, and a 412 is sorted by field overlap.** `lib/rebase.ts` reads the field names out of `changes_since` events and compares them with the fields I sent. Disjoint: resend on the server's version with a new idempotency key and say what was kept. Overlap, or no `changes_since`: the ConflictDialog shows the word diff and two choices. Esc decides nothing and keeps the draft.
+3. **Alternative.** Send the cache's version (no conflict ever shows, because a poll hides the other person's edit, so the save silently overwrites it), or always show the dialog (every unrelated change interrupts the user).
+4. **The UI knows no rules.** `barModel` maps `allowed_actions` to buttons and a test feeds it every pair of actions to prove it never offers one the server did not allow. A lowered priority asks for a reason only because the server answered `REASON_REQUIRED`; resolve without approval offers "Request approval" only because the server answered `APPROVAL_REQUIRED`.
+5. **Proved by.** 18 new Vitest tests (rebase plans and resend/limit/passthrough; the dialog's three outcomes producing the right PATCH with the right `If-Match` and a new key; `allowed_actions` driving buttons) and two Playwright tests with two browser contexts: a claim race released together (exactly one "Assigned to you", the other "took PAY-nnn", both screens end on the same owner) and a stale description edit (conflict dialog with the diff, then "Save my version"). By hand: claim, block with reason, unblock, priority with the reason popover, comment, resolve, stale approve and the draft banner, with screenshots in four statuses, light and dark.
+6. **Honest gap.** Polling, not SSE; most properties read-only; the disjoint-edit, approve-after-edit and live scenarios have no Playwright test (KNOWN_LIMITATIONS, "Frontend session B").
