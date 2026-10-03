@@ -14,7 +14,7 @@ What exists:
 - `web/`: Vite + React + TypeScript (strict) + Tailwind v4, ESLint 9, Prettier, Vitest. One placeholder page that calls healthz and shows loading, ok and error states. 4 tests.
 - Docker: `db`, `migrate` (placeholder `echo`), `api`, `worker`, `web` (nginx; proxies `/api`; `/api/v1/stream` unbuffered with a 1 h timeout). `compose.test.yaml` has `db-test` (tmpfs), `api-test`, `web-test`.
 - CI (`.github/workflows/ci.yml`): `api` (ruff, ruff format, mypy, pytest on a postgres service), `web` (eslint, prettier, tsc, vitest, build), `hygiene` (no CRLF, no tracked PDF or `.env`, gitleaks over full history).
-- Not built yet, by design: `seed` service, Alembic setup, `/readyz`, any table, auth, CSRF, CSP headers.
+- Not built yet, by design: `seed` service, Alembic setup, any table, auth, CSRF, CSP headers; `/readyz` is a phase 2 item.
 
 Verified: everything in the Phase 0 Done-when list; see `docs/REQUIREMENTS_TRACE.md`.
 **Deferred:** `docker compose up --build` on port 8080 itself (another local project holds it). Verified on 8081 and 8082. Re-check at the phase 14 clean-clone run.
@@ -52,6 +52,6 @@ Phase 1: schema, migrations, seed data (SPEC §3).
 
 - Replace the `migrate` placeholder command with `alembic upgrade head`; create `api/alembic/env.py` (async) and the first hand-written migration.
 - Add the `seed` compose service and `scripts/seed.py`.
-- Add `/readyz` (DB reachable, migrations at head) per SPEC §11.
+- `/readyz` (DB reachable, migrations at head, SPEC §11) moves to **phase 2**: it needs the database engine and app lifespan, which arrive there.
 - Tests under `api/tests/db` run on the existing `db-test`; each needs a clean schema per run.
 - SPEC §4 reopen rules were corrected in phase 0 (`docs(spec): fix reopen target and table layout`); phase 4 should follow the corrected text.

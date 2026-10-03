@@ -9,5 +9,5 @@ router = APIRouter(prefix=API_PREFIX, tags=["health"])
 
 @router.get("/healthz")
 async def healthz() -> dict[str, str]:
-    """Liveness only. Readiness (DB reachable, migrations at head) arrives with phase 1."""
+    """Liveness only. Readiness (DB reachable, migrations at head) arrives with phase 2."""
     return {"status": "ok"}
