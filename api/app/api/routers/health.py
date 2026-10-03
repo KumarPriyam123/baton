@@ -1,6 +1,8 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 
 from app.api.constants import API_PREFIX
+from app.db.migrations import check_ready
 
 # Routers declare the full prefix themselves (not via include_router(prefix=...)) so the
 # matched route template, and therefore the access log's `route` field, keeps /api/v1.
@@ -9,5 +11,12 @@ router = APIRouter(prefix=API_PREFIX, tags=["health"])
 
 @router.get("/healthz")
 async def healthz() -> dict[str, str]:
-    """Liveness only. Readiness (DB reachable, migrations at head) arrives with phase 2."""
+    """Liveness only: the process is up. No database access."""
     return {"status": "ok"}
+
+
+@router.get("/readyz")
+async def readyz(request: Request) -> JSONResponse:
+    """Readiness: the database answers and its migrations are at the head this code expects."""
+    report = await check_ready(request.app.state.engine)
+    return JSONResponse(report.body(), status_code=200 if report.ready else 503)

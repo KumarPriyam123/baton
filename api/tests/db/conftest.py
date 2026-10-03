@@ -1,24 +1,14 @@
 import asyncio
 from collections.abc import AsyncIterator
-from pathlib import Path
 
 import asyncpg
 import pytest
 from alembic import command
-from alembic.config import Config
 
 from app.db.urls import asyncpg_dsn
+from tests.support.db import alembic_config
 
 from .factories import World, make_world
-
-API_DIR = Path(__file__).resolve().parents[2]
-
-
-def alembic_config(url: str) -> Config:
-    config = Config(str(API_DIR / "alembic.ini"))
-    config.set_main_option("script_location", str(API_DIR / "alembic"))
-    config.attributes["url"] = url
-    return config
 
 
 async def _reset_schema(url: str) -> None:

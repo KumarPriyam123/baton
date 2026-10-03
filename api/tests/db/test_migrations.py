@@ -10,8 +10,7 @@ from alembic import command
 from alembic.script import ScriptDirectory
 
 from app.db.urls import asyncpg_dsn, with_database
-
-from .conftest import alembic_config
+from tests.support.db import alembic_config
 
 SNAPSHOT_QUERIES = {
     "tables": """

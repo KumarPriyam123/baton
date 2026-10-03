@@ -17,8 +17,7 @@ from app.db.urls import asyncpg_dsn, with_database
 from scripts.seedlib import generate, load
 from scripts.seedlib.personas import DEMO_PASSWORD
 from scripts.seedlib.verify import verify_histories
-
-from .conftest import alembic_config
+from tests.support.db import alembic_config
 
 LOAD_BUDGET_SECONDS = 30  # BUILD_PLAN phase 1: demo seed loads in under 30 s
 
