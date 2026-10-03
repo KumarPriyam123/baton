@@ -116,7 +116,14 @@ async def _write(
 
 
 async def _result(tx: CommandTx, ctx: ActorContext, key: str, *, changed: bool) -> Result:
-    return Result(await items_service.get_item(tx.conn, ctx, key, tx.now), changed)
+    """The item after the command, for the person who ran it. They were authorised before anything
+    was written, and the change may have taken their right to see it (a member who releases a
+    confidential item, a lead who transfers one away): rendering through the visibility filter
+    would 404 and roll their own command back (decision 38). `allowed_actions` still comes from
+    policy, so it is empty when they can no longer see it."""
+    record = await items_repo.get_by_key_unchecked(tx.conn, ctx, key)
+    assert record is not None
+    return Result(items_service.build_view(record, ctx, tx.now), changed)
 
 
 def _can_work(role: TeamRole | None) -> bool:
@@ -328,9 +335,7 @@ async def transfer(
     # Every event names the old team in its live-update notice, so its screens drop the item.
     await _write(tx, item, plan.updates, plan.events, prev_team_id=item.team_id)
 
-    record = await items_repo.get_by_key_unchecked(tx.conn, ctx.user_id, item.key)
-    assert record is not None
-    return Result(items_service.build_view(record, ctx, tx.now), changed=True)
+    return await _result(tx, ctx, item.key, changed=True)
 
 
 # ----- approvals ------------------------------------------------------------------------------

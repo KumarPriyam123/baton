@@ -16,6 +16,7 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.sql.elements import ColumnElement
@@ -167,12 +168,13 @@ def can_view(ctx: ActorContext, item: ItemFacts) -> bool:
     return not item.confidential or role == TeamRole.LEAD or item.assignee_id == ctx.user_id
 
 
-def visibility_clause(ctx: ActorContext) -> ColumnElement[bool]:
+def visibility_clause(ctx: ActorContext, columns: Any = None) -> ColumnElement[bool]:
     """The same rule as can_view, as SQL over `work_items`. Every query that returns or counts
-    items must filter with this, in the WHERE clause, before LIMIT (never in Python after)."""
+    items must filter with this, in the WHERE clause, before LIMIT (never in Python after).
+    `columns` is an alias of work_items (`alias.c`) when the rule is applied to a joined copy."""
     if ctx.is_admin:
         return sa.true()
-    wi = schema.work_items.c
+    wi = columns if columns is not None else schema.work_items.c
     conditions: list[ColumnElement[bool]] = [wi.requester_id == ctx.user_id]
     team_ids = list(ctx.roles)
     if team_ids:

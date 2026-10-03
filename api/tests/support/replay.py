@@ -6,6 +6,10 @@ it from the state the earlier events left, with the reason, resolution and appro
 it must lead where the history says it led. A history that `evaluate` refuses is either an
 impossible history or a rule that drifted.
 
+Limits: `new_assignee_can_work` is always passed as True (the history does not record the target's
+role at the time), and the destination of a reopen or a transfer is not compared with the history
+(the command works it out from the people involved).
+
 Who acted is not judged here: events do not record the actor's role at the time, and today's
 memberships need not match it. That is policy.py's job (T-FLOW, T-VIS).
 """

@@ -111,7 +111,7 @@ def _page(*where: ColumnElement[bool]) -> Select[Any]:
     return sa.select(*_COLUMNS).where(*where)
 
 
-def _item_query(viewer_id: uuid.UUID, page: Subquery) -> Select[Any]:
+def _item_query(ctx: ActorContext, page: Subquery) -> Select[Any]:
     """The item view over `page`, a subquery of `_page()` that already has its LIMIT."""
     b = page.c
     t = schema.teams.c
@@ -153,10 +153,14 @@ def _item_query(viewer_id: uuid.UUID, page: Subquery) -> Select[Any]:
         page.join(schema.teams, t.id == b.team_id)
         .join(requester, requester.c.id == b.requester_id)
         .outerjoin(assignee, assignee.c.id == b.assignee_id)
-        .outerjoin(duplicate, duplicate.c.id == b.duplicate_of_id)
+        .outerjoin(
+            duplicate,
+            # The key of the original is shown only to someone who may see the original (I3).
+            sa.and_(duplicate.c.id == b.duplicate_of_id, visibility_clause(ctx, duplicate.c)),
+        )
         .outerjoin(ev, ev.c.id == b.last_event_id)
         .outerjoin(ev_actor, ev_actor.c.id == ev.c.actor_id)
-        .outerjoin(reads, sa.and_(reads.c.item_id == b.id, reads.c.user_id == viewer_id))
+        .outerjoin(reads, sa.and_(reads.c.item_id == b.id, reads.c.user_id == ctx.user_id))
         .outerjoin(latest_approval, sa.true())
         .outerjoin(ap_requester, ap_requester.c.id == latest_approval.c.requested_by)
         .outerjoin(ap_decider, ap_decider.c.id == latest_approval.c.decided_by)
@@ -224,18 +228,18 @@ async def get_visible_by_key(
 ) -> ItemRecord | None:
     """The item the actor may see, or None (missing and hidden look the same, SPEC 5.1)."""
     page = _page(wi.key == key, visibility_clause(ctx)).subquery("page")
-    query = _item_query(ctx.user_id, page)
+    query = _item_query(ctx, page)
     row = (await conn.execute(query)).first()
     return ItemRecord.from_row(row) if row else None
 
 
 async def get_by_key_unchecked(
-    conn: AsyncConnection, viewer_id: uuid.UUID, key: str
+    conn: AsyncConnection, ctx: ActorContext, key: str
 ) -> ItemRecord | None:
     """The item with no visibility filter, for the answer to a command whose actor may have just
     given up the right to see it (a lead who transfers an item away, decision 38). Only a command
     that has already authorised the actor may call this; never a read endpoint."""
-    return _first(await conn.execute(_item_query(viewer_id, _page(wi.key == key).subquery("page"))))
+    return _first(await conn.execute(_item_query(ctx, _page(wi.key == key).subquery("page"))))
 
 
 def _first(result: sa.CursorResult[Any]) -> ItemRecord | None:
@@ -281,13 +285,14 @@ class LockedItem:
 
 async def lock_by_key(conn: AsyncConnection, key: str) -> LockedItem | None:
     """SELECT ... FOR UPDATE on the item row, first thing in every command (SPEC 6.4). Hidden
-    or not, the row is locked; the caller decides what the actor may know about it."""
+    or not, the row is locked; the caller decides what the actor may know about it.
+
+    The lock statement touches `work_items` alone. If it also joined `teams` (or read the pending
+    approval in a subquery), a command that waited for the lock would re-check those parts against
+    the snapshot from before the wait: after a concurrent transfer the join would match nothing and
+    the actor would be told the item does not exist. The team and the approval are read by a second
+    statement, which in READ COMMITTED sees everything committed by then."""
     t, ap = schema.teams.c, schema.approvals.c
-    pending_by = (
-        sa.select(ap.requested_by)
-        .where(ap.item_id == wi.id, ap.status == ApprovalStatus.PENDING.value)
-        .scalar_subquery()
-    )
     row = (
         await conn.execute(
             sa.select(
@@ -295,8 +300,6 @@ async def lock_by_key(conn: AsyncConnection, key: str) -> LockedItem | None:
                 wi.key,
                 wi.version,
                 wi.team_id,
-                t.key.label("team_key"),
-                t.name.label("team_name"),
                 wi.type,
                 wi.title,
                 wi.description,
@@ -311,16 +314,24 @@ async def lock_by_key(conn: AsyncConnection, key: str) -> LockedItem | None:
                 wi.requires_approval,
                 wi.requester_id,
                 wi.assignee_id,
-                pending_by.label("pending_approval_requested_by"),
             )
-            .select_from(schema.work_items.join(schema.teams, t.id == wi.team_id))
             .where(wi.key == key)
-            .with_for_update(of=schema.work_items)
+            .with_for_update()
         )
     ).first()
     if row is None:
         return None
+    team = (await conn.execute(sa.select(t.key, t.name).where(t.id == row.team_id))).one()
+    pending_by = (
+        await conn.execute(
+            sa.select(ap.requested_by).where(
+                ap.item_id == row.id, ap.status == ApprovalStatus.PENDING.value
+            )
+        )
+    ).scalar_one_or_none()
     values = dict(row._mapping)
+    values["team_key"], values["team_name"] = team.key, team.name
+    values["pending_approval_requested_by"] = pending_by
     values["type"] = ItemType(values["type"])
     values["status"] = ItemStatus(values["status"])
     if values["resolution"] is not None:
@@ -622,7 +633,7 @@ async def list_items(
         return [k.desc() if spec.descending else k.asc() for k in spec.keys(columns)]
 
     window = inner.order_by(*ordered(wi)).limit(limit + 1).subquery("page")
-    query = _item_query(ctx.user_id, window).order_by(*ordered(window.c))
+    query = _item_query(ctx, window).order_by(*ordered(window.c))
     rows = (await conn.execute(query)).all()
     records = [ItemRecord.from_row(r) for r in rows]
     page = records[:limit]
