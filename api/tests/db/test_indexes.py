@@ -120,6 +120,13 @@ EXPECTED_INDEXES: dict[str, dict[str, Any]] = {
         "predicate": ["pending"],
         "serves": "worker claim",
     },
+    # Not in SPEC 3.2: added in phase 3 (migration 0004, ENGINEERING_DECISIONS 23).
+    "approvals_item_idx": {
+        "table": "approvals",
+        "method": "btree",
+        "key": "item_id, requested_at DESC",
+        "serves": "newest approval of an item; does a pending or approved one exist",
+    },
 }
 
 EXPECTED_PRIMARY_KEYS = {

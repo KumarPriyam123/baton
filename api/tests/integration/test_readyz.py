@@ -14,7 +14,7 @@ def settings_for(url: str) -> Settings:
 
 
 def test_expected_head_is_the_newest_migration() -> None:
-    assert expected_head() == "0003"
+    assert expected_head() == "0004"
 
 
 async def test_ready_when_the_database_is_at_the_migration_head(test_database_url: str) -> None:
@@ -29,8 +29,8 @@ async def test_ready_when_the_database_is_at_the_migration_head(test_database_ur
         "status": "ok",
         "database": True,
         "migrations": True,
-        "current": "0003",
-        "expected": "0003",
+        "current": "0004",
+        "expected": "0004",
     }
 
 
