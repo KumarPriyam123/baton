@@ -36,6 +36,7 @@ from app.domain.enums import (
 )
 from app.domain.errors import ValidationFailed
 from app.domain.policy import ActorContext, visibility_clause
+from app.repo import search
 
 wi = schema.work_items.c
 
@@ -483,6 +484,7 @@ class ItemFilters:
     overdue: bool | None = None
     confidential: bool | None = None
     updated_since: datetime | None = None
+    q: str | None = None  # full-text search (repo/search.py); ranked, never paged
 
 
 _FINISHED = [ItemStatus.RESOLVED.value, ItemStatus.CLOSED.value]
@@ -522,6 +524,8 @@ def filter_clauses(
         clauses.append(wi.confidential.is_(filters.confidential))
     if filters.updated_since is not None:
         clauses.append(wi.updated_at >= filters.updated_since)
+    if filters.q is not None:
+        clauses.append(search.match_clause(filters.q))
     return clauses
 
 
@@ -643,6 +647,28 @@ async def list_items(
     page = records[:limit]
     more = len(records) > limit
     return page, encode_item_cursor(sort, page[-1]) if more and page else None
+
+
+async def search_items(
+    conn: AsyncConnection, ctx: ActorContext, filters: ItemFilters, *, limit: int, now: datetime
+) -> list[ItemRecord]:
+    """The best matches of `filters.q`, best first, at most `search.TOP`. The filters (and the
+    visibility rule) are in the same WHERE clause as the match, so they apply before the ranking
+    and the LIMIT, and a hidden item cannot take a place in the top 50."""
+    assert filters.q is not None
+    exact, score = search.rank_columns(filters.q)
+    inner = _page(*filter_clauses(ctx, filters, now)).add_columns(
+        exact.label("rank_exact"), score.label("rank_score")
+    )
+    window = (
+        inner.order_by(exact.desc(), score.desc(), wi.id)
+        .limit(min(limit, search.TOP))
+        .subquery("page")
+    )
+    query = _item_query(ctx, window).order_by(
+        window.c.rank_exact.desc(), window.c.rank_score.desc(), window.c.id
+    )
+    return [ItemRecord.from_row(r) for r in (await conn.execute(query)).all()]
 
 
 async def facet_counts(

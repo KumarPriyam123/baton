@@ -398,7 +398,7 @@ async def test_assignee_can_be_a_specific_person(
         "updated_since=2025-01-01T00:00:00",
         "sort=random",
         "team=TOOLONG",
-        "q=refund",
+        "q=",
         "colour=red",
     ],
 )

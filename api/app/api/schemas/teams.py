@@ -6,6 +6,7 @@ from app.domain.enums import TeamRole
 
 
 class TeamOut(BaseModel):
+    id: uuid.UUID
     key: str
     name: str
     description: str

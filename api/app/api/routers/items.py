@@ -19,6 +19,7 @@ from app.api.idempotency import (
 from app.api.pagination import ITEM_DEFAULT_LIMIT, ITEM_MAX_LIMIT
 from app.api.preconditions import ExpectedVersion, etag
 from app.api.responses import respond
+from app.api.schemas.collab import SimilarItemOut
 from app.api.schemas.items import (
     CreateItemRequest,
     EventOut,
@@ -32,6 +33,7 @@ from app.db.tx import CommandTx
 from app.domain.enums import ItemStatus, ItemType
 from app.domain.errors import ValidationFailed, VersionConflict
 from app.repo import items as items_repo
+from app.repo import search as search_repo
 from app.services import items as items_service
 
 router = APIRouter(prefix=f"{API_PREFIX}/items", tags=["items"])
@@ -61,6 +63,7 @@ ALLOWED_LIST_PARAMS = frozenset(
         "overdue",
         "confidential",
         "updated_since",
+        "q",
         "sort",
         "cursor",
         "limit",
@@ -99,6 +102,15 @@ def item_filters(
     overdue: Annotated[bool | None, Query(description="Open and past its due date")] = None,
     confidential: bool | None = None,
     updated_since: Annotated[str | None, Query(description="ISO 8601 time")] = None,
+    q: Annotated[
+        str | None,
+        Query(
+            max_length=200,
+            description="Search: an item key like PAY-142, or words from the title or "
+            "description. Typos in the title still match. Results are ranked, best first, "
+            "at most 50, with no cursor.",
+        ),
+    ] = None,
 ) -> items_repo.ItemFilters:
     """Shared by the list and the facets, so both count the same set. Unknown parameters are an
     error rather than being ignored: a filter that is silently dropped shows the wrong items."""
@@ -129,6 +141,11 @@ def item_filters(
                     {"field": "updated_since", "message": "No time zone.", "type": "value_error"}
                 ],
             )
+    if q is not None and not q.strip():
+        raise ValidationFailed(
+            "q cannot be blank.",
+            errors=[{"field": "q", "message": "Type something to search for.", "type": "missing"}],
+        )
     return items_repo.ItemFilters(
         team=team.upper() if team else None,
         status=status or [],
@@ -139,6 +156,7 @@ def item_filters(
         overdue=overdue,
         confidential=confidential,
         updated_since=since,
+        q=q.strip() if q else None,
     )
 
 
@@ -198,13 +216,33 @@ async def list_items(
     actor: CurrentActor,
     conn: Conn,
     filters: Filters,
-    sort: Sort = "priority",
+    sort: Sort | None = None,
     cursor: str | None = None,
     limit: Annotated[int, Query(ge=1, le=ITEM_MAX_LIMIT)] = ITEM_DEFAULT_LIMIT,
 ) -> ItemsPage:
     """Items you can see, filtered and sorted, a keyset page at a time (no totals, no OFFSET).
-    Pass `next_cursor` back as `cursor` with the same filters and sort."""
+    Pass `next_cursor` back as `cursor` with the same filters and sort (default `priority`).
+
+    With `q` the answer is the best matches, ranked, at most 50: no `sort` (the rank is the
+    order) and no `cursor` (ranked search has no deep paging, SPEC 8)."""
     now = utcnow()
+    if filters.q is not None:
+        extra = [name for name, given in (("sort", sort), ("cursor", cursor)) if given is not None]
+        if extra:
+            raise ValidationFailed(
+                f"{' and '.join(extra)} cannot be combined with q: a search is ranked and "
+                "returns its best 50.",
+                errors=[
+                    {"field": f, "message": "Not allowed with q.", "type": "value_error"}
+                    for f in extra
+                ],
+            )
+        found = await items_repo.search_items(conn, actor.ctx, filters, limit=limit, now=now)
+        return ItemsPage(
+            items=[ItemOut.from_view(items_service.build_view(r, actor.ctx, now)) for r in found],
+            next_cursor=None,
+        )
+    sort = sort or "priority"
     records, next_cursor = await items_repo.list_items(
         conn, actor.ctx, filters, sort=sort, cursor=cursor, limit=limit, now=now
     )
@@ -223,6 +261,24 @@ async def list_items(
 async def get_item_facets(actor: CurrentActor, conn: Conn, filters: Filters) -> FacetsOut:
     counts = await items_repo.facet_counts(conn, actor.ctx, filters, utcnow())
     return FacetsOut(**counts)
+
+
+@router.get(
+    "/similar",
+    operation_id="find_similar_items",
+    summary="Possible duplicates while typing",
+    responses=_PROBLEMS,
+)
+async def find_similar_items(
+    actor: CurrentActor,
+    conn: Conn,
+    team_id: uuid.UUID,
+    title: Annotated[str, Query(min_length=1, max_length=200)],
+) -> list[SimilarItemOut]:
+    """Open items of the team with a similar title (similarity above 0.35, top 5), only among
+    items you may see. The create form shows them while you type."""
+    found = await search_repo.similar_items(conn, actor.ctx, team_id, title.strip())
+    return [SimilarItemOut(**vars(r)) for r in found]
 
 
 # ----- one item -----------------------------------------------------------------------------

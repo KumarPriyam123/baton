@@ -48,6 +48,7 @@ async def list_teams(actor: CurrentActor, conn: Conn) -> list[TeamOut]:
     teams = await teams_repo.list_teams(conn)
     return [
         TeamOut(
+            id=t.id,
             key=t.key,
             name=t.name,
             description=t.description,
