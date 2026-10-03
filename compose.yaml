@@ -30,6 +30,12 @@ services:
       context: ./api
     environment: *api-env
     command: ["alembic", "upgrade", "head"]
+    # So `docker compose run --rm migrate alembic revision -m "..."` writes the new file to the
+    # host. Root, because the image's default user cannot write to the mount; this service only
+    # ever talks to the database.
+    user: "0:0"
+    volumes:
+      - ./api/alembic:/app/alembic
     depends_on:
       db:
         condition: service_healthy
