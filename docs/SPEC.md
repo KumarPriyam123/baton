@@ -223,11 +223,13 @@ stateDiagram-v2
     awaiting_approval --> in_progress: approve / reject (reason) / cancel / invalidated by edit
     in_progress --> resolved: resolve (note; approval if required)
     resolved --> in_progress: reopen (reason)
+    resolved --> new: reopen (previous owner no longer on the team)
     new --> closed: close (resolution, reason) / withdraw (requester)
     in_progress --> closed: close (resolution, reason)
     blocked --> closed: close (resolution, reason)
     resolved --> closed: close
     closed --> in_progress: reopen (lead, reason)
+    closed --> new: reopen (previous owner no longer on the team)
 ```
 
 ### 4.1 Transitions
@@ -250,9 +252,9 @@ stateDiagram-v2
 | `close` | new, in_progress, blocked → closed | lead | resolution + reason; `duplicate_of` if duplicate | `closed` |
 | `withdraw` | new → closed | requester | reason; resolution `wont_do` | `closed` |
 | `close` | resolved → closed | lead, requester | — | `closed` |
-
-**Reopen target:** an item goes back to `in_progress` with its previous owner if that person is still a member or lead of the team; otherwise it goes to `new`, unassigned.
 | `transfer` | any open state | lead of current team | target team, reason | see 4.3 |
+
+**Reopen target:** an item goes back to `in_progress` with its previous owner if that person is still a member or lead of the team; otherwise it goes to `new`, unassigned. Reopen lands in `new` when there is no valid previous owner, because `owner_when_active` forbids `in_progress` without one.
 
 `release`, `assign` and `unassign` are not allowed while `awaiting_approval`; cancel the approval first.
 
