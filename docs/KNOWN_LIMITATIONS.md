@@ -13,3 +13,39 @@ demo data. Anyone connected as the table owner can therefore still erase the aud
 - **What it would take:** run the API and worker as a role that owns nothing and has no TRUNCATE
   privilege (`REVOKE TRUNCATE ON ALL TABLES`), keeping the owner role for migrations and the seed;
   optionally a `BEFORE TRUNCATE` statement trigger that the seed bypasses explicitly.
+
+## Login lock reveals which emails have an account (after five failures)
+
+Five wrong passwords lock a real account, and the sixth attempt answers 429. An unknown email has no
+row to lock, so it keeps answering 401. Someone who tries an email six times can tell the two apart.
+SPEC 5.4 asks only that the message be the same for an unknown email and a wrong password, which it is.
+
+- **What it would take:** a `login_attempts` table keyed by a hash of the (normalised) email, so
+  unknown emails are throttled exactly like real ones; or rate limiting at nginx by client address.
+
+## Sessions have no absolute lifetime
+
+A session lasts as long as it is used at least once every 12 hours (SPEC 5.4 specifies idle expiry
+only). A stolen cookie that is kept busy never expires until the user logs out or is deactivated.
+
+- **What it would take:** an `absolute_expires_at` (for example 7 days) checked next to `expires_at`.
+
+## Failed logins have no time window
+
+The counter resets on a successful login or after a lock expires, not after a quiet period: four
+failures a month ago plus one today lock the account.
+
+- **What it would take:** store the time of the first failure of the current run and reset the count
+  when it is older than a window.
+
+## Membership removal is refused while the person owns open items
+
+SPEC 4.3b wants those items unassigned automatically. Until the workflow exists (phase 4), a lead must
+reassign or release them first (ENGINEERING_DECISIONS 14).
+
+## The user directory is open to every signed-in user and uses a sequential scan
+
+`GET /users?q=` returns name and email of active people to anyone signed in (an internal directory,
+SPEC 11), and matches with `ILIKE`, which scans the `users` table. That is fine at a few thousand
+rows; a `pg_trgm` index would be the next step. The demo-account list recognises personas by having no
+digit in the email (`aarav.gupta17@...` is generated, `priya.lead@...` is not).

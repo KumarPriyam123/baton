@@ -70,3 +70,25 @@ Phase 1, by hand: the `owner_when_active` CHECK was deleted from `0001_initial_s
 (`cmp` identical).
 
 The same check is automated for every database guard (next section), so it is not only a one-off.
+
+
+## Phase 2 guards (identity, sessions, authorization, visibility)
+
+| Guard | Test | Sabotage observed |
+|---|---|---|
+| Every cell of SPEC 5.2 | `tests/unit/test_policy_matrix.py`: 11 scenarios x 25 actions x 9 personas (2,475 cells) plus team, organisation and combined-role rows. Expectations are typed by hand from the SPEC; a second test fails if the SPEC's action list and the policy's differ | `CLAIM` allowed for any role: 24 cells red (viewers claiming) |
+| `visibility_clause` equals `can_view` | `tests/db/test_visibility_parity.py` (T-VIS): all 24 demo users and 300 random role combinations over 600 items; also counts, `LIMIT` after filtering, and a clause that forgets the confidential rule must be detected | clause without the confidential rule: the dedicated test goes red and shows it leaks exactly the confidential items |
+| Invisible item is 404, never 403 | matrix (`NOT_FOUND` for every persona that cannot see) and parity (farah, a Compliance member, cannot see 5+ confidential items she neither owns nor raised) | |
+| CSRF on every unsafe route | `tests/integration/test_csrf.py` reads the app's own OpenAPI, so later routes are covered automatically; a route added in the test is protected without touching the middleware | check returning `True`: 6 tests red |
+| Only the token hash is stored; logout kills the token | `tests/integration/test_auth.py` | `token_hash` returning the token: 2 tests red |
+| Idle expiry, deactivation, role changes apply at once | `test_auth.py` (time-machine for expiry; direct SQL for deactivation and membership removal) | |
+| Throttling | `tests/integration/test_throttling.py`: 6th attempt 429 even with the right password; same answer for unknown email; lock expires at 15 min; counter restarts after a lock; parallel failures all counted | |
+| Every SPEC 12 code | `tests/integration/test_errors.py`: expected table typed by hand; validation errors never echo input; crashes never leak internals | |
+| Membership rules | `tests/integration/test_teams_members.py`: leads vs admins vs everyone else, removal effective on the next request, refusal while they own open items, keyset paging | |
+
+The integration tests run the real app, with its lifespan, against a scratch database holding the
+committed demo seed (`tests/support/seeded.py`), so sessions, cookies and SQL are the real ones.
+Time-dependent behaviour uses `time-machine`; every timestamp that matters is passed in from
+Python (never `now()` in SQL) so the tests can move the clock.
+
+Whole suite at the end of phase 2: 2,853 API tests, about 70 s.

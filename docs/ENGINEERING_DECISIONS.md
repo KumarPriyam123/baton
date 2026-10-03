@@ -88,3 +88,56 @@ application would have enforced it, which CLAUDE.md I10 does not allow for a cri
 `BEFORE UPDATE` triggers reject changes to `teams.key` and to `work_items.key`, `number` and
 `origin_team_id` (the three that make a key unique). Rewriting the same value is allowed, and
 every other column (item_seq, version, team_id on a transfer...) is untouched.
+
+
+## 14. Phase 2: removing or demoting a member is refused while they own open items
+
+SPEC 4.3b wants those items unassigned in the same transaction, which needs `record_event()` and the
+workflow (phases 3 and 4). Writing `work_items` from the membership code would break I1, so for now
+`DELETE` and "demote to viewer" return 409 `WORKFLOW_VIOLATION` ("They still own N open items...")
+and change nothing. Phase 4 replaces the refusal with the automatic unassign. Demoting a lead to
+member is allowed (a member can own items). Decided with Kumar.
+
+## 15. Phase 2: METHOD_NOT_ALLOWED added to the error table
+
+405 now has a code in SPEC 12, so a wrong method is problem+json like everything else. No other
+code was added; the other statuses reuse the table (wrong password is 401 `UNAUTHENTICATED` with the
+detail "Invalid email or password.", a body field that fails is 400 `VALIDATION_FAILED`).
+
+## 16. Phase 2: demo password is a constant in `app/demo.py`, not a setting
+
+Shared by `GET /demo/users` and the seed. No new configuration variable. It is not a secret (the login
+page shows it in demo mode) and the API refuses `DEMO_MODE` in `ENV=prod`.
+
+## 17. Phase 2: any signed-in user can list a team's members
+
+SPEC 11 does not restrict `GET /teams/{key}/members`. It follows `/teams` and `/users`, which are
+open to every signed-in user so requests can be routed and pickers can work.
+
+## 18. Phase 2: CSRF is checked before routing and before authentication
+
+An unsafe request without the token is 403 `CSRF_FAILED` whether or not the caller is signed in, and
+whether or not the route or method exists: a wrong method without the token gets 403, with it 405.
+The rule is by HTTP method, so a route added later is covered without anyone remembering.
+
+## 19. Phase 2: sessions
+
+Idle expiry is 12 h from the last use; `last_seen_at` and `expires_at` are written at most once a
+minute so a read does not become a write on every request. The browser cookie is a session cookie
+(no `Max-Age`); the server enforces the expiry. Password verification runs in a worker thread, and an
+unknown email does the same hashing work as a wrong password.
+
+## 20. Phase 2: no `POST /teams` route
+
+SPEC 5.2 lists "create teams" as an admin action, and the policy covers it, but SPEC 11 has no route.
+Phase 11's team administration adds it.
+
+## 21. Phase 2: `/readyz` body
+
+200 or 503 with `{status, database, migrations, current, expected}`. It is an infrastructure probe,
+so it is not problem+json. `/healthz` stays pure liveness.
+
+## 22. Phase 2: Idempotency-Key is not yet read on membership routes
+
+SPEC 11 marks it optional there. Adding a member is naturally idempotent (same role: 200, no change),
+and the idempotency layer arrives in phase 3.
