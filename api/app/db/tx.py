@@ -9,18 +9,21 @@ No network calls inside `work`. Nothing is committed unless `work` returns.
 """
 
 import asyncio
+import json
 import random
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any, Protocol
 
 import sqlalchemy as sa
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.db import errors
+from app.db import errors, schema
+from app.domain.enums import EventKind
 from app.domain.errors import Busy
 
 LOCK_TIMEOUT = "2s"
@@ -89,3 +92,96 @@ async def run_command[T](
                 ) from error
             await asyncio.sleep(random.uniform(0, 0.02 * attempt))  # noqa: S311  (jitter)
     raise AssertionError("unreachable")  # pragma: no cover
+
+
+# ----- history (CLAUDE.md I1) -----------------------------------------------------------------
+
+OUTBOX_TOPIC = "item.event"
+NOTIFY_CHANNEL = "item_changes"
+
+
+class EventSubject(Protocol):
+    """The item right after the change this event describes (a row of work_items)."""
+
+    @property
+    def id(self) -> uuid.UUID: ...
+    @property
+    def team_id(self) -> uuid.UUID: ...
+    @property
+    def version(self) -> int: ...
+    @property
+    def requester_id(self) -> uuid.UUID: ...
+    @property
+    def assignee_id(self) -> uuid.UUID | None: ...
+    @property
+    def confidential(self) -> bool: ...
+
+
+async def record_event(
+    tx: CommandTx,
+    item: EventSubject,
+    kind: EventKind,
+    *,
+    data: dict[str, Any] | None = None,
+    reason: str | None = None,
+    is_decision: bool = False,
+    prev_team_id: uuid.UUID | None = None,
+) -> int:
+    """Write one event of a command, in the command's transaction. Every change to a work item
+    goes through here (I1). It writes, together:
+
+    - the `item_events` row, carrying the version the item has AFTER the change (the current
+      version for comment, sla_breached and duplicate_suggested, which never bump it);
+    - `work_items.last_event_id` and `updated_at`, plus `last_activity_at` when a person wrote
+      the event (system events have no actor and must not reset "going stale");
+    - an outbox row (topic item.event) for the worker;
+    - NOTIFY item_changes, delivered only if the transaction commits.
+    """
+    conn = tx.conn
+    event_id = int(
+        (
+            await conn.execute(
+                sa.insert(schema.item_events)
+                .values(
+                    item_id=item.id,
+                    team_id=item.team_id,
+                    actor_id=tx.actor_id,
+                    kind=kind.value,
+                    item_version=item.version,
+                    data=data or {},
+                    reason=reason,
+                    is_decision=is_decision,
+                    request_id=tx.request_id,
+                    created_at=tx.now,
+                )
+                .returning(schema.item_events.c.id)
+            )
+        ).scalar_one()
+    )
+    stamp: dict[str, Any] = {"last_event_id": event_id, "updated_at": tx.now}
+    if tx.actor_id is not None:
+        stamp["last_activity_at"] = tx.now
+    await conn.execute(
+        sa.update(schema.work_items).where(schema.work_items.c.id == item.id).values(**stamp)
+    )
+    await conn.execute(
+        sa.insert(schema.outbox).values(
+            topic=OUTBOX_TOPIC, payload={"event_ids": [event_id], "request_id": tx.request_id}
+        )
+    )
+    notice = {
+        "event_id": event_id,
+        "item_id": str(item.id),
+        "version": item.version,
+        "team_id": str(item.team_id),
+        "prev_team_id": str(prev_team_id) if prev_team_id else None,
+        "requester_id": str(item.requester_id),
+        "assignee_id": str(item.assignee_id) if item.assignee_id else None,
+        "confidential": item.confidential,
+    }
+    await conn.execute(
+        sa.text("SELECT pg_notify(:channel, :payload)"),
+        {"channel": NOTIFY_CHANNEL, "payload": json.dumps(notice, separators=(",", ":"))},
+    )
+    tx.event_ids.append(event_id)
+    return event_id
