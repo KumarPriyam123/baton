@@ -53,6 +53,8 @@
   --ease-pop: cubic-bezier(0.2, 0.8, 0.2, 1);
   --dur-float: 160ms;
   --dur-press: 100ms;
+  --dur-grow: 220ms; /* handoff track segment */
+  --dur-wash: 1.2s; /* a field that changed live */
 }
 
 /* §2.2 dark */
@@ -99,6 +101,8 @@
   :root {
     --dur-float: 0ms;
     --dur-press: 0ms;
+    --dur-grow: 0ms;
+    --dur-wash: 0ms;
   }
   *,
   *::before,

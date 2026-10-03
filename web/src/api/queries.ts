@@ -1,8 +1,14 @@
 /** Server reads, as TanStack Query hooks. Writes go through `useCommand`. */
-import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  keepPreviousData,
+  useInfiniteQuery,
+  useQuery,
+} from "@tanstack/react-query";
 
-import { ApiError, api, unwrap } from "../lib/api";
+import { ApiError, type ItemOut, api, unwrap } from "../lib/api";
 import { type ListFilters, toFacetQuery, toListQuery } from "../lib/filters";
+import { mergeItem } from "../lib/itemCache";
 import { keys } from "./keys";
 
 export const PAGE_SIZE = 50;
@@ -30,10 +36,17 @@ export function useAttention() {
   });
 }
 
+/**
+ * A refetch can arrive after a newer mutation response. The query function merges with what is
+ * cached, so an older answer never replaces a newer one (I13, SPEC 6.6 version guard).
+ */
 export function itemQuery(key: string) {
   return {
     queryKey: keys.item(key),
-    queryFn: () => unwrap(api.GET("/api/v1/items/{key}", { params: { path: { key } } })),
+    queryFn: async ({ client }: { client: QueryClient }) => {
+      const fetched = await unwrap(api.GET("/api/v1/items/{key}", { params: { path: { key } } }));
+      return mergeItem(client.getQueryData<ItemOut>(keys.item(key)), fetched);
+    },
   };
 }
 
@@ -76,6 +89,40 @@ export function useFacets(filters: ListFilters) {
       unwrap(api.GET("/api/v1/items/facets", { params: { query: toFacetQuery(filters) } })),
     placeholderData: keepPreviousData,
     staleTime: 15_000,
+  });
+}
+
+/** Newest first, a page at a time (I8); the timeline reverses them and offers "Show earlier". */
+export function useEvents(key: string | undefined) {
+  return useInfiniteQuery({
+    queryKey: keys.events(key ?? ""),
+    queryFn: ({ pageParam }) =>
+      unwrap(
+        api.GET("/api/v1/items/{key}/events", {
+          params: {
+            path: { key: key ?? "" },
+            query: { order: "desc", limit: 100, after_event_id: pageParam },
+          },
+        }),
+      ),
+    initialPageParam: 0,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+    enabled: key !== undefined,
+  });
+}
+
+/** The first page of a team's members: names for ids in events, and the assignee picker. */
+export function useMembers(teamKey: string | undefined) {
+  return useQuery({
+    queryKey: keys.members(teamKey ?? ""),
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/v1/teams/{key}/members", {
+          params: { path: { key: teamKey ?? "" }, query: { limit: 100 } },
+        }),
+      ),
+    enabled: teamKey !== undefined,
+    staleTime: 60_000,
   });
 }
 

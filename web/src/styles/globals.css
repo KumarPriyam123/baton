@@ -135,6 +135,27 @@
   animation: baton-fade-in var(--dur-float) linear;
 }
 
+/* Handoff track: a new segment grows in (220 ms), the one decorative motion (§2.5). */
+@keyframes baton-grow {
+  from {
+    transform: scaleX(0);
+    opacity: 0.4;
+  }
+}
+.grow-in {
+  transform-origin: left center;
+  animation: baton-grow var(--dur-grow) var(--ease-pop);
+}
+/* A field that changed live fades from --dispatch-wash to nothing over 1.2 s (§2.5). */
+@keyframes baton-wash {
+  from {
+    background-color: var(--dispatch-wash);
+  }
+}
+.wash {
+  animation: baton-wash var(--dur-wash) ease-out;
+}
+
 /* Loading skeleton: a static block, no shimmer (no looping animation besides the spinner). */
 .skeleton {
   background: var(--skeleton);

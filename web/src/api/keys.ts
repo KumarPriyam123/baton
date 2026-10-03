@@ -9,6 +9,8 @@ export const keys = {
   teams: ["teams"] as const,
   attention: ["attention"] as const,
   item: (key: string) => ["item", key] as const,
+  events: (key: string) => ["item", key, "events"] as const,
+  members: (teamKey: string) => ["teams", teamKey, "members"] as const,
   lists: ["items", "list"] as const,
   list: (filters: ListFilters) => ["items", "list", filters] as const,
   facets: (filters: ListFilters) => ["items", "facets", filters] as const,
