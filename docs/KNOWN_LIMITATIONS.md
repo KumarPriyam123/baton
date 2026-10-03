@@ -1,7 +1,38 @@
 # Known limitations
 
-What Baton does not do, or does only partly, and what it would take. The out-of-scope list in
-SPEC section 15 is added in phase 14; this file starts with limitations found while building.
+What Baton does not do, or does only partly, and what it would take. The first part is the summary,
+ordered by how much it matters to someone using or judging the system; the second part is SPEC section 15
+(out of scope on purpose); the third is the detail found while building, in the order it was found.
+
+## Summary, most important first
+
+| # | Limitation | Effect | What it would take |
+|---|---|---|---|
+| 1 | **Live updates are 10 s polling, not SSE** (decision 49, 50). `GET /stream` does not exist; `NOTIFY` is sent but nobody listens | A change by someone else shows after about 10 s, not 2 s; load grows with open tabs, not with changes; no 250 ms coalescing, no "N items changed" bar | The listener and `GET /stream` from SPEC 10 (about a day); `useLiveUpdates.ts` keeps its interface and the polling stays as the fallback. Detail: "Frontend session B" |
+| 2 | **Several screens and two endpoints are not built**: dashboard, decision log, teams, jobs and notifications screens; `GET /stats/teams` and `GET /decisions` | Managers have no overview; dead jobs can only be seen through `GET /admin/jobs`; notifications exist in the API and database but not on screen | Two read endpoints through `visibility_clause()` (SPEC 7) and five screens against the generated client |
+| 3 | **Most properties are not editable in the UI**: title, type, due date, confidential, requires-approval (priority, watch and description are) | The API supports every edit (`PATCH`); users cannot do them from the item pane | Inline editors reusing `useSaveFields` and the rebase logic |
+| 4 | **Performance was not measured.** The large seed (50,000 items) loads and verifies, but there is no `bench.py`, no `PERFORMANCE.md`, no p95 | The SPEC 13 targets are unproven; an admin's unfiltered list sorts the whole table (about 20 ms at 50,000 items, measured once) | Run `bench.py` per BUILD_PLAN phase 12; add the `COALESCE(due_at, 'infinity')` expression indexes if `EXPLAIN` asks |
+| 5 | **No cleanup job and no fault injection**: idempotency keys, expired sessions and `done` outbox rows are never deleted; `FAULT_NOTIFY_FAIL_RATE` is read but unused | Tables grow; an old idempotency key still replays | The hourly job from SPEC 9 under an advisory lock (a few handlers, a few tests) |
+| 6 | **Test coverage gaps** (TESTING.md, "What is deliberately not tested"): three Playwright scenarios, no axe or screen-reader check, no 375 px layout, no sabotage runs after phase 4, `--profile e2e` Compose service missing | Browser behaviour beyond login, inbox, queue, create and item detail is unproven; phones are not designed for (A10 says "usable") | A Playwright service in `compose.test.yaml`; the remaining plan scenarios; `@axe-core/playwright` on each screen |
+| 7 | **No deactivate-user endpoint.** Accounts are deactivated in the database, and a deactivated user keeps the items they own | Items can be stuck with someone who has left until a lead reassigns them | An endpoint calling `unassign_owned_items` per team in one transaction (ENGINEERING_DECISIONS 44) |
+| 8 | **Authentication is real but basic**: no absolute session lifetime, failed logins have no time window, the lock reveals which emails exist after five failures, no rate limiting at nginx | A kept-busy stolen cookie never expires; credential stuffing is only slowed per account | `absolute_expires_at`; a `login_attempts` table keyed by email hash; nginx `limit_req`. SSO replaces all of it in production (A1) |
+| 9 | **Append-only is for UPDATE and DELETE, not `TRUNCATE`** | Whoever owns the table can still erase history | Run the app as a role without TRUNCATE; keep the owner role for migrations and the seed |
+| 10 | **Two small consistency windows**: a command is authorised with the roles read at request start (a 2 s window); a replayed 412 can outlive its reason | A just-demoted lead's last in-flight edit can succeed; a client that reuses a key after a rebase is told the old answer | Re-read the role after the lock; include `If-Match` in the idempotency fingerprint (the web client already uses a new key per changed request) |
+| 11 | **Names for ids and long lists are approximate**: a team has its first 50 members in pickers; a former member who never acted reads "someone"; the user directory scans with `ILIKE`; `changes_since` is capped at 100 | Large teams and long histories degrade quietly instead of failing | Server-side names in event payloads; `pg_trgm` index on users; paged pickers |
+| 12 | **Port 8080 must be free** for the default setup | `docker compose up` fails with "port is already allocated" | `WEB_PORT=8081` in `.env` (README). Hit on the author's machine during the clean-clone check |
+
+CI at submission: see the last entry of this file ("CI status").
+
+## Out of scope for v1 (SPEC section 15)
+
+Each is a decision, not an oversight: SSO; email and Slack notifications (the outbox is built so another handler can
+do it); attachments; @mentions; editing or deleting comments (history is append-only, A8); bulk actions;
+searching comments; custom workflows per team (the transition table is data in `domain/workflow.py`, so a new
+status is one place plus a migration for the enum); business-hours SLA calendars; real-time co-editing of text
+(conflicts are detected and shown, not merged); materialized dashboard counters (counts are queried live
+through the visibility clause); multi-region.
+
+## Detail found while building
 
 ## History is append-only for UPDATE and DELETE, not for TRUNCATE
 
