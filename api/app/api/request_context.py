@@ -3,7 +3,6 @@
 Pure ASGI (not BaseHTTPMiddleware) so contextvars and streaming responses behave.
 """
 
-import json
 import re
 import time
 import uuid
@@ -11,6 +10,8 @@ import uuid
 import structlog
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from app.api.problem import problem_body, send_problem
 
 REQUEST_ID_HEADER = "X-Request-ID"
 # Accept only safe ids from the client: they end up in logs and response headers.
@@ -76,24 +77,11 @@ class RequestContextMiddleware:
 
 async def _send_internal_error(send: Send, request_id: str) -> None:
     """problem+json for crashes, so even a 500 carries the request id (SPEC 12)."""
-    body = json.dumps(
-        {
-            "type": "about:blank",
-            "title": "Internal Server Error",
-            "status": 500,
-            "detail": "Something went wrong. Nothing was half-saved.",
-            "code": "INTERNAL",
-            "request_id": request_id,
-        }
-    ).encode()
-    await send(
-        {
-            "type": "http.response.start",
-            "status": 500,
-            "headers": [
-                (b"content-type", b"application/problem+json"),
-                (b"content-length", str(len(body)).encode()),
-            ],
-        }
+    body = problem_body(
+        status=500,
+        code="INTERNAL",
+        title="Internal Server Error",
+        detail="Something went wrong. Nothing was half-saved.",
+        request_id=request_id,
     )
-    await send({"type": "http.response.body", "body": body})
+    await send_problem(send, body)

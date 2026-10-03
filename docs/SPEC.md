@@ -646,6 +646,7 @@ Every error is `application/problem+json` (RFC 9457) with `type`, `title`, `stat
 | 403 | `FORBIDDEN` | visible but not permitted (`detail` says why) | toast with the reason |
 | 403 | `CSRF_FAILED` | missing or wrong token | refetch `/me`, retry once |
 | 404 | `NOT_FOUND` | missing or not visible | "This item doesn't exist or you no longer have access" |
+| 405 | `METHOD_NOT_ALLOWED` | wrong HTTP method for a path | show a generic error; a client bug |
 | 409 | `ALREADY_CLAIMED` | lost a claim race | roll back; "Asha took this 4 seconds ago" |
 | 409 | `WORKFLOW_VIOLATION` | action not valid from the current state | refresh item; explain using `current.status` |
 | 409 | `APPROVAL_ALREADY_PENDING` | second approval request | refresh item |

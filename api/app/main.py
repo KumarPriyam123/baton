@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.api.errors import install_error_handlers
 from app.api.request_context import RequestContextMiddleware
 from app.api.routers import health
 from app.config import Settings, get_settings
@@ -18,6 +19,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url=None,
     )
     app.state.settings = settings
+    install_error_handlers(app)
     app.add_middleware(RequestContextMiddleware)
     app.include_router(health.router)
     return app
