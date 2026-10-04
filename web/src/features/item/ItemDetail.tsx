@@ -156,8 +156,14 @@ function Loaded({ item, onClose }: { item: ItemOut; onClose: () => void }) {
   // --- unread: remember what was unread when it opened, then tell the server it was seen ---
   const markRead = useCommand<undefined, ItemOut>({
     item,
+    // The server also reads this item's notifications, so the bell (badge and list) is stale now.
     run: () =>
-      unwrap(api.POST("/api/v1/items/{key}/read", { params: { path: { key: item.key } } })),
+      unwrap(api.POST("/api/v1/items/{key}/read", { params: { path: { key: item.key } } })).then(
+        (seen) => {
+          void qc.invalidateQueries({ queryKey: keys.notifications });
+          return seen;
+        },
+      ),
     onError: () => true, // a missed "seen" is harmless; no toast
   });
   // Loaded is keyed by item, so this is read once per open: the open itself clears it server-side.

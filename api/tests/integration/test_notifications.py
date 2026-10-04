@@ -111,6 +111,27 @@ async def test_marking_read_only_touches_my_unread_rows_and_ignores_other_people
     )
 
 
+async def test_opening_an_item_marks_only_that_items_notifications_read_for_me(
+    api: httpx.AsyncClient, app_settings: Settings, seeded: SeededDatabase
+) -> None:
+    opened = await with_comments(api, app_settings, comments=2)
+    other = await created(api)
+    await clear(seeded, MEERA, ASHA)
+    mine = await notify(seeded, MEERA, opened, count=3)
+    elsewhere = await notify(seeded, MEERA, other, count=1)
+    asha_rows = await notify(seeded, ASHA, opened, count=3)
+
+    seen = await api.post(f"/api/v1/items/{opened['key']}/read", headers=csrf_headers(api))
+
+    assert seen.status_code == 200
+    unread = await rows(
+        seeded.url,
+        "SELECT id FROM notifications WHERE id = ANY($1) AND read_at IS NULL",
+        mine + elsewhere + asha_rows,
+    )
+    assert sorted(int(r["id"]) for r in unread) == sorted(elsewhere + asha_rows)
+
+
 async def test_marking_read_repeats_with_the_same_idempotency_key_and_needs_ids_or_all(
     api: httpx.AsyncClient, app_settings: Settings, seeded: SeededDatabase
 ) -> None:

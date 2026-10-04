@@ -55,4 +55,14 @@ async def mark_read(conn: AsyncConnection, ctx: ActorContext, key: str, now: dat
             "read_at": insert.excluded.read_at,
         },
     ).returning(r.c.item_id)
-    return (await conn.execute(stmt)).first() is not None
+    row = (await conn.execute(stmt)).first()
+    if row is None:
+        return False
+    # Seen is seen, whichever way the item was opened: its notifications for this person are read.
+    n = schema.notifications.c
+    await conn.execute(
+        sa.update(schema.notifications)
+        .where(n.user_id == ctx.user_id, n.item_id == row.item_id, n.read_at.is_(None))
+        .values(read_at=now)
+    )
+    return True
