@@ -110,7 +110,7 @@ async def test_nothing_is_sent_for_a_command_that_rolls_back_but_the_commit_afte
             subject = types.SimpleNamespace(**facts)
 
             async def doomed(tx: CommandTx) -> None:
-                await record_event(tx, subject, EventKind.FIELD_CHANGED)  # type: ignore[arg-type]
+                await record_event(tx, subject, EventKind.FIELD_CHANGED)
                 raise RuntimeError("rolled back after the event was written")
 
             engine = create_async_engine(app_settings.database_url)
