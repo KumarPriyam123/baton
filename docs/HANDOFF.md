@@ -4,18 +4,22 @@ Where the project stands, how to run it, and what to know before the next sessio
 
 ## Current state
 
-**Phase 11 (lean, management visibility) is done on top of phase 14.** `GET /stats/teams` and `GET /decisions`
+**Submission-final (final pass) is done: every planned phase and the frontend extras are on `main`.** Phases 0-7, 10, 11 and 14 (the lean ones are marked in KNOWN_LIMITATIONS), frontend sessions A and B, and branch `fe-extras` merged without conflicts: the command palette (`features/palette`, cmdk), the admin Jobs screen (`features/jobs`), team settings (`features/teams`), inline editors for title, due date, type, confidential and requires-approval (`features/item/FieldEditors.tsx`, `useFieldEdit.ts`) and the 375 px layout (`app/shell/MobileNav.tsx`). Live updates are SSE (phase 7, decision 52). Final-pass changes: `cn()` is `extendTailwindMerge`d with Baton's sizes and weights (test fails on the old one), `POST /items/{key}/read` also marks that item's notifications read (so opening an item from anywhere clears the bell), `web/e2e/axe.spec.ts` (no serious or critical axe findings on login, inbox, queue, item detail, dashboard), CLAUDE.md stack and command lines corrected, DEMO_SCRIPT run literally with two browsers and its wording fixed, README screenshots in `docs/screenshots/`.
+
+Verified from a fresh clone of GitHub (`C:/Projects/baton-clean-check`, `.env` copied from `.env.example` plus `WEB_PORT=8082` because an unrelated container holds 8080 and the dev stack holds 8081): `docker compose up --build`, readyz at migration 0004, sign in as Asha, create and claim an item in the browser, `web-test` (79 passed), `api-test` (3,382 passed, 0 skipped, 609 s). Playwright against the dev stack: 9 of 9 on the last full run (claim race, stale edit, double submit, live update, five axe checks); one earlier full run had two timing failures (double submit, the live update "within 2 s" check) while the clean-clone stack was also busy, and both passed alone and on rerun, so treat them as load-sensitive. Not done: a rehearsal by Kumar, the Mermaid diagrams were not rendered, the Playwright suite is not in CI, `bench.py` was not run. Tags: `submission-candidate-1` (earlier) and `submission-final`. The repo is private; making it public is the owner's decision.
+
+**Earlier state, phase 11 (lean, management visibility) on top of phase 14.** `GET /stats/teams` and `GET /decisions`
 (`repo/stats.py`, `repo/decisions.py`, `api/routers/overview.py`, `api/schemas/overview.py`; decision 51), the
 `/dashboard` and `/decisions` screens, and the notification bell in the rail (`features/dashboard`,
 `features/decisions`, `features/notifications`, `lib/notifications.ts`). Tests: `test_stats.py`,
 `test_decisions.py` (full API suite at the end: 3,366 passed, 0 skipped, 469 s; 6 of them new: a member vs a lead on a confidential item, figures equal the same person's
 queue lists, paging and filters, 401) and `lib/notifications.test.ts`. Screenshots: `node scripts/management-screens.mjs`
 (`THEME=dark`, `BASE_URL`, `PW_CHANNEL=chrome`). Limits: KNOWN_LIMITATIONS "Phase 11 was lean". Tag: `phase-11-done`.
-Not built: team settings, jobs page, command palette, median age and the 14-day series.
+Not built then (the first three were built in fe-extras): team settings, jobs page, command palette; still not built: median age and the 14-day series.
 
 **Phase 14 (lean, submission readiness) is done on top of frontend session B.** README, Top 5 decisions, ARCHITECTURE, TESTING (CB1-CB8 map and the not-tested list), KNOWN_LIMITATIONS (ordered), DEMO_SCRIPT (5 minutes), SPEC marked where it describes unbuilt things (decision 50). CI web lint fixed (`web/eslint.config.js`). Verified from a fresh clone of GitHub: build, migrate, seed, sign in, create and claim an item through nginx, readyz at migration 0004, API test command (3,360 passed, 0 skipped, 360 s; REQUIREMENTS_TRACE D2). Port 8080 is held by an unrelated container on this machine, so the check ran with `WEB_PORT=8082`. **Not done:** a rehearsed demo, PERFORMANCE.md, prepared answers to the six Final Discussion questions, the Mermaid diagrams were not rendered. The repo is private; making it public is the owner's decision. Tag: `submission-candidate-1`.
 
-**Frontend session B (phase 10, lean) is done on top of session A. Phase 7 (SSE) has not started.** Tags: `phase-4-done`, `phase-6-done`, `fe-a-done`, `fe-b-done`.
+**Frontend session B (phase 10, lean) is done on top of session A (phase 7, SSE, was built afterwards).** Tags: `phase-4-done`, `phase-6-done`, `fe-a-done`, `fe-b-done`.
 
 **Frontend session B added** (decision 49; limits in KNOWN_LIMITATIONS "Frontend session B"). `web/src/features/item/`: `ItemDetail` (the right-hand pane and `/items/:key`; `Loaded` is keyed by item), `HandoffTrack` + `track.ts` (pure builder), `ActionBar` + `actions.ts` (labels, forms and primary from `next_step`; buttons only from `allowed_actions`) + `useItemActions` (one `useCommand` for every workflow action), `Properties` (optimistic priority and watch), `Description` (local draft in localStorage, banner, `ConflictDialog`), `useSaveFields` (PATCH + `lib/rebase.ts`), `ApprovalPanel` (+ the stale-approve review), `Timeline` (filters, unread divider, optimistic composer), `names.ts`. `lib/`: `rebase.ts`, `eventText.ts`, `useLiveUpdates.ts` (10 s polling, hidden-tab pause, SSE-shaped interface), `announce.ts` (polite and assertive regions in the shell). `components/ui`: `Popover`, `DiffView`, `PriorityGlyph`, `Markdown`. `itemQuery` now merges by `(version, last_event_id)`. Tests: 38 Vitest (18 new: `rebase`, `Description` 412 flow, `actions`) and 3 Playwright (`create-double-submit`, `detail-concurrency`: claim race, stale edit). Screenshots: `node scripts/detail-screens.mjs` (`KEYS="PAY-88:new,..."`, `THEME=dark`). **Not built:** SSE, inline editing of title/type/due/confidential/requires-approval, notifications/dashboard/decisions/teams/jobs screens, command palette, axe, 375 px.
 
@@ -25,7 +29,7 @@ Not built: team settings, jobs page, command palette, median age and the 14-day 
 
 **Phase 5 added** (decision 46): `POST /items/{key}/comments` (key required, `commented` event, author auto-watches, answers `{comment, item}`); `PUT|DELETE /items/{key}/watch`; `POST /items/{key}/read` (upsert of `item_reads.last_read_event_id`); `GET /me/attention` (five sections, 10 items, counts capped at 100); `GET /me/notifications` and `POST /me/notifications/read`; `q` on `GET /items` and `/items/facets` (key jump, else full-text + trigram, top 50, no cursor); `GET /items/similar?team_id&title`; `comment_body` on timeline events; `watching` on the item; `id` on `GET /teams`. New code: `repo/{collab,search,attention,notifications}.py`, `services/comments.py`, `api/routers/collab.py` and `me.py`. Tests: `test_collaboration.py`, `test_search.py`, `test_attention.py`, `test_notifications.py`, and the phase 3 confidentiality test extended. **Not built:** the worker that creates notifications (phase 6), stats and decisions (phase 11). Untested by design: `docs/KNOWN_LIMITATIONS.md`, "Phase 5 was time-boxed".
 
-Repo: https://github.com/KumarPriyam123/baton (private). CI is green on `main` for phase 4 (api, web, hygiene): https://github.com/KumarPriyam123/baton/actions/runs/37141764027
+Repo: https://github.com/KumarPriyam123/baton (private). CI on `main` at `submission-final`: see KNOWN_LIMITATIONS, CI status
 
 What exists, on top of phases 0-3:
 
@@ -34,12 +38,12 @@ What exists, on top of phases 0-3:
 - **Endpoints** (`app/api/routers/item_commands.py`): `POST /items/{key}/claim | release | assign | transition | transfer | approvals`, `.../approvals/{id}/decision | cancel`. All take an optional `Idempotency-Key`; the versioned ones require `If-Match`. `ALREADY_CLAIMED` carries `claimed_by` and `claimed_at`.
 - **Approvals** (`app/repo/approvals.py`): bound to the content by `subject_hash`; a material PATCH or a transfer invalidates every live approval in the same transaction; four-eyes is policy and the CHECK `approvals_four_eyes`.
 - **Membership** (`app/services/teams.py`): removing or demoting to viewer unassigns the person's open items in the same transaction (decision 14 is superseded).
-- **Tests:** 3,325 API tests (unit, db, integration, concurrency; none skipped; about 350 s) and 4 web tests, about 350 s, all needing real Postgres. Phase 4 added T-FLOW (720 cells), T-CLAIM (service and HTTP), T-APPROVE-RACE (50 rounds), the approval and membership races, the seed replay through `workflow.evaluate`, persona checks and per-clause UPDATE guards. Sabotage results: `docs/TESTING.md`.
+- **Tests:** at phase 4, 3,325 API tests and 4 web tests; at submission-final 3,382 passed, 0 skipped, 609 s, 79 web tests, 9 Playwright checks. Phase 4 added T-FLOW (720 cells), T-CLAIM (service and HTTP), T-APPROVE-RACE (50 rounds), the approval and membership races, the seed replay through `workflow.evaluate`, persona checks and per-clause UPDATE guards. Sabotage results: `docs/TESTING.md`.
 
 Verified in this phase: every Done-when item (see `docs/REQUIREMENTS_TRACE.md`), the five sabotage rows (and why two of them needed more tests), the real stack through nginx on port 8081 (migration head 0004, claim, 409, 422 `APPROVAL_REQUIRED`, request, approve, events), an independent review (decision 45: four findings fixed, the rest left with reasons).
 **Still deferred:** `docker compose up` on port 8080 itself (another local project holds it); re-check at the phase 14 clean-clone run.
 
-Not built yet, by design: the worker (so the notifications table is only filled by the seed), SSE, the web UI, stats and decisions endpoints.
+(As of phase 4.) Not built then, by design: the worker, SSE, the web UI, stats and decisions endpoints; all of them exist now.
 
 ## Commands
 
@@ -48,8 +52,8 @@ Not built yet, by design: the worker (so the notifications table is only filled 
 | Start everything | `docker compose up --build` (http://localhost:8080; if taken, `WEB_PORT=8081` in `.env` or the shell) |
 | API tests | `docker compose -f compose.yaml -f compose.test.yaml run --rm api-test` (about 165 s) |
 | One test file | `... run --rm api-test pytest tests/integration/test_items_patch.py -q` |
-| Web unit tests | `docker compose -f compose.yaml -f compose.test.yaml run --rm web-test` (38 tests, about 9 s; add `--build` after dependency changes) |
-| Playwright (host) | stack up, then `cd web && BASE_URL=http://localhost:8081 PW_CHANNEL=chrome npx playwright test` (omit `PW_CHANNEL` to use Playwright's own browser after `npx playwright install chromium`) |
+| Web unit tests | `docker compose -f compose.yaml -f compose.test.yaml run --rm web-test` (79 tests, about 50 s; add `--build` after dependency changes) |
+| Playwright (host) | stack up, then `cd web && BASE_URL=http://localhost:8081 PW_CHANNEL=chrome npx playwright test` (omit `PW_CHANNEL` to use Playwright's own browser after `npx playwright install chromium`); `... playwright test axe` for the accessibility checks only. After a merge that changes `package.json`, run `npm ci` in `web/` first |
 | Screenshots for design review | `cd web && BASE_URL=http://localhost:8081 PW_CHANNEL=chrome node scripts/screenshots.mjs` (`AS="Asha Rao"`, `THEME=dark`); output in `web/test-results/screens` |
 | Regenerate API types | stack up, then `cd web && OPENAPI_URL=http://localhost:8081/api/openapi.json npm run gen:api` |
 | Web checks on the host | `cd web && npx tsc --noEmit && npx eslint . && npx prettier --check .` |
@@ -99,7 +103,7 @@ curl -b jar 'localhost:8080/api/v1/items?status=new&sort=updated&limit=5'
 - **A test that opens an asyncpg connection must close it** (`try/finally`, or `rows()` / `scalar()` in `tests/support/items.py`). Warnings are errors, so a leaked connection fails some other test later (`ResourceWarning: unclosed transport`).
 - **Race tests need distinct people.** `tests/support/workflow.py` has `extra_workers` (new PAY members with the shared test password), `many_clients` (one app, one signed-in client per email) and `released_together` lives in `tests/concurrency/test_workflow_concurrency.py`.
 - **Sabotage on a scratch branch from a committed tree**, restoring with `git checkout -- <file>`; the helper pattern is a tiny script that asserts the text occurs once before replacing it.
-- **Git identity** in this repo is `kpriyam2005p@gmail.com`; the account email is `k2005priyam@gmail.com`. Unconfirmed which is intended.
+- **Git identity:** all 140-odd commits are authored as `KPriYam-123 <kpriyam2005p@gmail.com>` (repo-local `user.name` and `user.email`), and the remote is `github.com/KumarPriyam123/baton`. Whether that email is added to the GitHub account (so the commits link to the profile) was not checked: GitHub, Settings, Emails shows it. The commit history was not rewritten.
 
 ## Decisions that shape later phases
 
@@ -134,8 +138,6 @@ Read `docs/ENGINEERING_DECISIONS.md` 35-45 before phase 5. In short:
 **Phase 12**
 - Expression indexes for `COALESCE(due_at, 'infinity')` if EXPLAIN on `baton_large` shows the sort (decisions 10 and 32); `scripts/bench.py` against `baton_large`.
 
-## Next phase
+## Next
 
-Either phase 7 (below) or the rest of the frontend (phase 11 screens). Phase 7 replaces the body of `lib/useLiveUpdates.ts` (same interface) and should add the 250 ms coalescing test; the polling stays as the fallback.
-
-Phase 7: live updates (SPEC 10): `GET /stream` (SSE) fed by `LISTEN item_changes` and `LISTEN notifications`, filtered with the visibility rule per client. Consider a `(user_id, id DESC)` index for the full notification list (KNOWN_LIMITATIONS).
+Nothing is planned. If there is time, KNOWN_LIMITATIONS has "With another week, in this order": the two security findings (M1 duplicate-suggestion leak, M2 CSP), exact SSE replay and the "N items changed" bar, idempotency on the member endpoints, the cleanup job, admin-path performance, then the test gaps. The old notes above (phase 5-11 "open items") are history; the live list is KNOWN_LIMITATIONS.

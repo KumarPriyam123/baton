@@ -10,7 +10,7 @@ docker compose -f compose.yaml -f compose.test.yaml run --rm web-test
 Source is mounted into both containers; add `--build` after dependency or Dockerfile changes. A skipped test
 counts as a failure. The API tests take about 6 minutes (real Postgres in a separate `db-test` container).
 
-Playwright (three tests, two files in `web/e2e`) runs from the host against a running stack, not from Compose:
+Playwright (nine checks, four files in `web/e2e`: claim race and stale edit, create double submit, live update, axe on five screens) runs from the host against a running stack, not from Compose:
 
 ```bash
 cd web && npm ci && npx playwright install chromium     # once
@@ -219,10 +219,13 @@ Nothing here is hidden: each item is either in KNOWN_LIMITATIONS with its reason
   item, rollback, replay, resync), 20 events in 100 ms = one refetch, backoff and the polling fallback (Vitest), and one
   Playwright scenario through nginx. Not tested: a non-reading client's server memory staying flat, two API processes,
   the hidden-tab refresh.
-- **Playwright covers three scenarios.** Not covered by Playwright: approve after a *description* edit, a disjoint
-  edit, any screen other than login, inbox, queue, create and item detail, and a second browser engine.
-  The disjoint rebase is a Vitest test only.
-- **No accessibility run** (axe is not wired), no screen-reader test, no 375 px layout test, no visual regression.
+- **Playwright covers claim race, stale edit, double submit, live update and axe.** Not covered by Playwright:
+  approve after a *description* edit, a disjoint edit, the command palette, the jobs page, team settings, and a
+  second browser engine. The disjoint rebase is a Vitest test only.
+- **Accessibility:** `web/e2e/axe.spec.ts` runs axe (WCAG 2 A/AA tags) on login, inbox, queue with an item open,
+  item detail and dashboard at 1280 px, light theme: no serious or critical violations. Axe reported colour
+  contrast as "incomplete" (could not decide) on the inbox and item detail. Not covered: the other screens, dark
+  theme, 375 px, a screen reader. No 375 px layout test (screenshots only) and no visual regression.
 - **Worker through real processes:** the worker is tested in-process with real Postgres; stopping and
   restarting the `docker compose` worker was checked by hand only, as were two workers (`--scale worker=2`).
 - **Phase 5 read paths** have one test per rule, not property tests over every persona (only the item list,
