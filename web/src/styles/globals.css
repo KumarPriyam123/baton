@@ -271,3 +271,20 @@
     justify-self: end;
   }
 }
+
+/*
+ * Phone (DESIGN �3.2, < 768 px): the strip keeps its fixed 44 px height (the virtual list measures
+ * rows by it), so the width is spent carefully: tighter columns and padding. The window decides
+ * here, not the strip's own width, so the 480 px desktop queue column is untouched.
+ */
+@media (max-width: 767px) {
+  .strip-link {
+    padding-left: 8px;
+    padding-right: 8px;
+    column-gap: 8px;
+    grid-template-columns: 60px 16px minmax(0, 1fr) auto 32px 8px;
+  }
+  .strip-key {
+    white-space: nowrap;
+  }
+}

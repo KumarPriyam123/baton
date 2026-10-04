@@ -44,7 +44,7 @@ export function Button({
         onClick?.(event);
       }}
       className={cn(
-        "relative inline-flex h-9 items-center justify-center gap-2 rounded-chip px-3 text-body font-strong",
+        "relative inline-flex h-9 max-md:min-h-11 items-center justify-center gap-2 rounded-chip px-3 text-body font-strong",
         "cursor-pointer transition-colors duration-100 ease-linear",
         "disabled:cursor-not-allowed disabled:opacity-50",
         variants[variant],

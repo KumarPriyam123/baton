@@ -83,7 +83,7 @@ export function Rail() {
   return (
     <nav
       aria-label="Main"
-      className="flex min-h-0 flex-col gap-1 overflow-y-auto bg-desk px-2 py-4 lg:px-3"
+      className="hidden min-h-0 flex-col gap-1 overflow-y-auto bg-desk px-2 py-4 md:flex lg:px-3"
     >
       <Link
         to="/inbox"
@@ -158,7 +158,7 @@ export function Rail() {
   );
 }
 
-function UserMenu() {
+export function UserMenu() {
   const me = useMe();
   const qc = useQueryClient();
   const navigate = useNavigate();
