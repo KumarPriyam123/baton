@@ -21,7 +21,7 @@ If code and SPEC disagree, the code is wrong. If SPEC looks wrong, **stop and as
 | Data access | SQLAlchemy 2.0 **Core** (async) + asyncpg; explicit SQL for critical paths; Alembic migrations (hand-written SQL allowed) |
 | Database | PostgreSQL 16 with `citext`, `pg_trgm` |
 | Worker | same codebase, separate process (`python -m app.worker`) |
-| Live updates | Server-Sent Events fed by Postgres `LISTEN/NOTIFY` |
+| Live updates | Server-Sent Events: one direct asyncpg `LISTEN` connection per API process -> in-process hub -> `GET /api/v1/stream`; client falls back to 10 s polling |
 | Auth | argon2-cffi, server-side sessions in Postgres, CSRF double-submit |
 | Logging | structlog JSON with request id |
 | API tests | pytest, pytest-asyncio, httpx, hypothesis, time-machine |

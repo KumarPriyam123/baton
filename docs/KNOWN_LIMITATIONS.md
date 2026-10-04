@@ -8,7 +8,7 @@ ordered by how much it matters to someone using or judging the system; the secon
 
 | # | Limitation | Effect | What it would take |
 |---|---|---|---|
-| 1 | **Live updates are 10 s polling, not SSE** (decision 49, 50). `GET /stream` does not exist; `NOTIFY` is sent but nobody listens | A change by someone else shows after about 10 s, not 2 s; load grows with open tabs, not with changes; no 250 ms coalescing, no "N items changed" bar | The listener and `GET /stream` from SPEC 10 (about a day); `useLiveUpdates.ts` keeps its interface and the polling stays as the fallback. Detail: "Frontend session B" |
+| 1 | **Live updates are SSE with a per-process replay buffer** (decision 52). Replay after a reconnect comes from an in-memory ring of 500 events, not from `item_events`, and event ids are not commit-ordered | A restart of the API, or a gap of more than 500 events, makes every client refetch what it shows (`resync`) instead of replaying; an event whose id is lower than one already seen can be missed on a reconnect (the next `resync` or the 20 s bell poll fixes it); several API processes each hold their own buffer | Replay from `item_events` by id with a visibility filter (the BUILD_PLAN design); no "N items changed" bar on the list yet |
 | 2 | **Two screens are not built**: team settings and the jobs page (the dashboard, decision log and notification bell exist since phase 11, lean: see "Phase 11 was lean") | Members are managed only through `/teams/{key}/members`; dead jobs only through `GET /admin/jobs` | Two screens against the generated client |
 | 3 | **Most properties are not editable in the UI**: title, type, due date, confidential, requires-approval (priority, watch and description are) | The API supports every edit (`PATCH`); users cannot do them from the item pane | Inline editors reusing `useSaveFields` and the rebase logic |
 | 4 | **Performance was not measured.** The large seed (50,000 items) loads and verifies, but there is no `bench.py`, no `PERFORMANCE.md`, no p95 | The SPEC 13 targets are unproven; an admin's unfiltered list sorts the whole table (about 20 ms at 50,000 items, measured once) | Run `bench.py` per BUILD_PLAN phase 12; add the `COALESCE(due_at, 'infinity')` expression indexes if `EXPLAIN` asks |
@@ -224,10 +224,9 @@ a few `E2E ...` requests in the dev database.
 ## Frontend session B (phase 10) was lean: what is missing, and what is unverified
 
 **Not built:**
-- **SSE (phase 7).** Live updates are 10 s polling (decision 49): a change by someone else shows up within
-  about 10 s (measured 9 s), not 2 s, and there is no 250 ms coalescing test, no `resync`, and no
-  "N items changed, Refresh order" bar on the list. Lists refetch wholesale, so a list page older than a
-  just-applied mutation can show old data until the next poll.
+- **SSE (phase 7).** Built later, see decision 52. What is still missing: no "N items changed, Refresh order" bar on the list (lists refetch wholesale).
+  Before decision 52 live updates were 10 s polling (measured 9 s). Lists still refetch wholesale, so a
+  list page older than a just-applied mutation can show old data until the next refetch.
 - **Editing most properties.** Only priority (optimistic) and watch are editable inline, and the
   description. Title, type, due date, confidential and requires-approval have no editor even though
   `allowed_actions` offers them; the Properties rows are read-only.

@@ -103,6 +103,6 @@ Two workers split the jobs with `FOR UPDATE SKIP LOCKED` (`docker compose up --s
 
 ## If asked: what is not there
 
-Live updates are 10-second polling, not SSE; there are no dashboard, decisions, teams or jobs screens (the
+Live updates are SSE (with 10-second polling as a fallback); there are no dashboard, decisions, teams or jobs screens (the
 jobs endpoint exists); not every property is editable inline. See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md),
 which is ordered by importance.

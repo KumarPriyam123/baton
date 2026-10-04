@@ -9,13 +9,14 @@ flowchart LR
     N -->|"/api/v1/*"| A["API (FastAPI)<br/>policy, workflow, commands"]
     A -->|"1 short transaction per command<br/>item + event + outbox + idempotency key"| P[("PostgreSQL 16<br/>work_items, item_events,<br/>outbox, notifications, sessions")]
     W["Worker<br/>python -m app.worker"] -->|"claim jobs: FOR UPDATE SKIP LOCKED<br/>write notifications, duplicates, SLA events"| P
-    P -.->|"NOTIFY item_changes / notifications<br/>(emitted; no listener in v1)"| X["(SSE listener: not built)"]
-    B -.->|"poll every 10 s while visible:<br/>GET item, events, lists, attention"| N
+    P -->|"NOTIFY item_changes / notifications<br/>(delivered on commit)"| X["API: one LISTEN connection<br/>-> hub -> GET /api/v1/stream (SSE)"]
+    X -->|"item.changed {key, version, event_id}<br/>notification.created, resync"| N
+    B -.->|"fallback after 3 failed connects:<br/>poll every 10 s"| N
 ```
 
-Solid lines exist and are tested. Dotted lines: polling is how the browser learns of other people's
-changes today; `NOTIFY` is already sent inside each command's transaction, so a listener can be added
-without touching a command (KNOWN_LIMITATIONS, "Live updates are polling").
+Solid lines exist and are tested. The browser learns of other people's changes from the SSE stream
+(ENGINEERING_DECISIONS 52); it carries only keys and versions and the browser refetches through the normal,
+authorized API. The dotted line is the 10 s polling fallback.
 
 ## What lives where
 
@@ -65,7 +66,7 @@ never replace newer data. A change by someone else shows up in about 10 s.
 
 | Order | Breaks first | Why | What I would change |
 |---|---|---|---|
-| 1 | Polling load | N open tabs x 1 refetch / 10 s of lists and items; the cost grows with users, not with changes | Add the SSE endpoint fed by `LISTEN item_changes` (design in SPEC 10; the NOTIFY is already emitted); keep polling as the fallback |
+| 1 | Stream fan-out | Each open tab is one held connection and one bounded queue per API process; several API processes each hold a LISTEN connection and their own 500-event replay buffer | Replay from `item_events` instead of memory; consider a shared fan-out once a process holds thousands of streams |
 | 2 | Hot rows | Every command locks its item row; a very popular item serialises its writers (correct, but a queue) | Nothing for human-speed traffic; if needed, split the comment path from the version lock |
 | 3 | List and attention queries | Keyset paging and partial indexes are in place, but the admin's unfiltered sort scans (KNOWN_LIMITATIONS); the "large seed" (50,000 items) was loaded and verified but latency was not benchmarked | Expression indexes for the `due_at` sort, `EXPLAIN` on the large seed, `scripts/bench.py` |
 | 4 | Outbox table growth | No cleanup job yet: `done` rows, idempotency keys and sessions are never deleted | The hourly cleanup job from SPEC 9; partition `outbox` by day at high volume |

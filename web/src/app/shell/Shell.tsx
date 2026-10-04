@@ -11,6 +11,7 @@ import {
 import { Outlet, useLocation, useNavigate } from "react-router";
 
 import { NewRequestDialog } from "../../features/create/NewRequestDialog";
+import { useLiveUpdates } from "../../lib/useLiveUpdates";
 import { useShortcuts } from "../../lib/useShortcuts";
 import { Rail } from "./Rail";
 import { TopBar } from "./TopBar";
@@ -49,6 +50,7 @@ export function Shell({ children }: { children?: ReactNode }) {
     [navigate, openNewRequest, location.pathname, location.search],
   );
   useShortcuts(handlers);
+  useLiveUpdates();
 
   const value = useMemo(() => ({ openNewRequest }), [openNewRequest]);
 

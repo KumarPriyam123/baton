@@ -16,12 +16,15 @@ from app.api.routers import (
     items,
     me,
     overview,
+    stream,
     teams,
     users,
 )
 from app.config import Settings, get_settings
 from app.db.engine import create_engine
 from app.logging import configure_logging
+from app.realtime.hub import Hub
+from app.realtime.listener import Listener
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -32,9 +35,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         engine = create_engine(settings)
         app.state.engine = engine
+        hub = Hub()
+        app.state.hub = hub
+        listener = Listener(settings.database_url, hub)
+        await listener.start()
         try:
             yield
         finally:
+            await listener.stop()
             await engine.dispose()
 
     app = FastAPI(
@@ -64,5 +72,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(items.router)
     app.include_router(item_commands.router)
     app.include_router(collab.router)
+    app.include_router(stream.router)
     app.include_router(admin.router)
     return app

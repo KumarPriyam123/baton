@@ -173,3 +173,16 @@ async def insert_notifications(
         .returning(n.user_id)
     )
     return [uuid.UUID(str(uid)) for uid in (await conn.execute(stmt)).scalars()]
+
+
+async def unread_count(conn: AsyncConnection, ctx: ActorContext, *, cap: int) -> int:
+    """How many notifications are unread and visible, counted up to `cap` (the bell shows "20+",
+    so counting further is wasted work). Visibility applies to counts too (I3)."""
+    inner = (
+        sa.select(sa.literal(1))
+        .select_from(schema.notifications.join(schema.work_items, wi.id == n.item_id))
+        .where(n.user_id == ctx.user_id, n.read_at.is_(None), visibility_clause(ctx))
+        .limit(cap)
+        .subquery()
+    )
+    return int((await conn.execute(sa.select(sa.func.count()).select_from(inner))).scalar_one())

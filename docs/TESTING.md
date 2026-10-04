@@ -215,8 +215,10 @@ Nothing here is hidden: each item is either in KNOWN_LIMITATIONS with its reason
 - **No performance or load tests.** `api/tests/perf` is empty and `scripts/bench.py` does not exist; the SPEC 13
   latency targets were not measured. The large seed (50,000 items) loads and every history replays, 17 s
   (see "Seed verification"), but no p95 was recorded.
-- **No live-update tests.** SSE is not built; polling is covered only by what Playwright happened to see (a change
-  appeared after about 9 s, checked by hand). No test for the 10 s timer, the hidden-tab pause or reconnects.
+- **Live updates are tested, with gaps.** Hub bounds and visibility (unit), the stream over a real socket (confidential
+  item, rollback, replay, resync), 20 events in 100 ms = one refetch, backoff and the polling fallback (Vitest), and one
+  Playwright scenario through nginx. Not tested: a non-reading client's server memory staying flat, two API processes,
+  the hidden-tab refresh.
 - **Playwright covers three scenarios.** Not covered by Playwright: approve after a *description* edit, a disjoint
   edit, any screen other than login, inbox, queue, create and item detail, and a second browser engine.
   The disjoint rebase is a Vitest test only.
