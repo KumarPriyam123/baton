@@ -29,7 +29,7 @@ Not built then (the first three were built in fe-extras): team settings, jobs pa
 
 **Phase 5 added** (decision 46): `POST /items/{key}/comments` (key required, `commented` event, author auto-watches, answers `{comment, item}`); `PUT|DELETE /items/{key}/watch`; `POST /items/{key}/read` (upsert of `item_reads.last_read_event_id`); `GET /me/attention` (five sections, 10 items, counts capped at 100); `GET /me/notifications` and `POST /me/notifications/read`; `q` on `GET /items` and `/items/facets` (key jump, else full-text + trigram, top 50, no cursor); `GET /items/similar?team_id&title`; `comment_body` on timeline events; `watching` on the item; `id` on `GET /teams`. New code: `repo/{collab,search,attention,notifications}.py`, `services/comments.py`, `api/routers/collab.py` and `me.py`. Tests: `test_collaboration.py`, `test_search.py`, `test_attention.py`, `test_notifications.py`, and the phase 3 confidentiality test extended. **Not built:** the worker that creates notifications (phase 6), stats and decisions (phase 11). Untested by design: `docs/KNOWN_LIMITATIONS.md`, "Phase 5 was time-boxed".
 
-Repo: https://github.com/KumarPriyam123/baton (private). CI on `main` at `submission-final`: see KNOWN_LIMITATIONS, CI status
+Repo: https://github.com/KumarPriyam123/baton (private). CI on `main` (api, web, hygiene all green) at the docs commit before the tag: https://github.com/KumarPriyam123/baton/actions/runs/37171539413
 
 What exists, on top of phases 0-3:
 

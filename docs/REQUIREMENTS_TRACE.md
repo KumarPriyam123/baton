@@ -173,7 +173,7 @@ Real stack through nginx on port 8081 (migration head 0004): claim, a losing cla
 
 | ID | Brief asks for | Where | Status |
 |---|---|---|---|
-| D1 | Working source code | repository (private: github.com/KumarPriyam123/baton) | ◐ phase 0 skeleton pushed; `main` pushed at the `submission-final` tag; CI result pending |
+| D1 | Working source code | repository (private: github.com/KumarPriyam123/baton) | ☑ phase 0 skeleton pushed; `main` pushed at the `submission-final` tag; CI green (api, web, hygiene): https://github.com/KumarPriyam123/baton/actions/runs/37171539413 |
 | D2 | Clear instructions for running the application | README Quick start (verified from a clean clone) | ☑ fresh clone of GitHub at `2d57929`: `cp .env.example .env`, `docker compose up --build` (stopped at "port 8080 is already allocated" because an unrelated container holds it), then the README's fix `WEB_PORT=8082`; sign in as asha, create and claim PAY-113 through nginx, `/readyz` at 0004, `api-test`: 3,360 passed in 360 s, 0 skipped. Sign-in was checked by API (curl), not by clicking in a browser |
 | D3 | Any required setup instructions | README; `.env.example` | ☑ `.env.example` lists every variable; README stub; README Quick start and `.env.example` run from a fresh clone of GitHub (WEB_PORT=8082 because 8080 is taken here) |
 | D4 | Engineering decisions document (~5 decisions, trade-offs) | `docs/ENGINEERING_DECISIONS.md` | ☑ "Top 5 decisions" table (decision, alternative, trade-off) above the 50-entry log |
