@@ -11,8 +11,10 @@ import {
 import { Outlet, useLocation, useNavigate } from "react-router";
 
 import { NewRequestDialog } from "../../features/create/NewRequestDialog";
+import { CommandPalette } from "../../features/palette/CommandPalette";
 import { useLiveUpdates } from "../../lib/useLiveUpdates";
 import { useShortcuts } from "../../lib/useShortcuts";
+import { MobileNav } from "./MobileNav";
 import { Rail } from "./Rail";
 import { TopBar } from "./TopBar";
 
@@ -56,7 +58,7 @@ export function Shell({ children }: { children?: ReactNode }) {
 
   return (
     <Ctx.Provider value={value}>
-      <div className="grid h-dvh grid-cols-[56px_minmax(0,1fr)] lg:grid-cols-[232px_minmax(0,1fr)]">
+      <div className="flex h-dvh flex-col md:grid md:grid-cols-[56px_minmax(0,1fr)] lg:grid-cols-[232px_minmax(0,1fr)]">
         <Rail />
         <div className="flex min-h-0 min-w-0 flex-col bg-sheet">
           <TopBar searchRef={searchRef} onNewRequest={openNewRequest} />
@@ -64,8 +66,10 @@ export function Shell({ children }: { children?: ReactNode }) {
             {children ?? <Outlet />}
           </main>
         </div>
+        <MobileNav />
       </div>
       <NewRequestDialog open={creating} onOpenChange={setCreating} />
+      <CommandPalette />
       {/* Announces live changes to screen readers (DESIGN §7). Toasts have their own region. */}
       <div aria-live="polite" role="status" className="sr-only-live" id="live-region" />
       <div aria-live="assertive" role="alert" className="sr-only-live" id="live-region-assertive" />

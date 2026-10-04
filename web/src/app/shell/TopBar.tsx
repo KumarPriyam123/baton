@@ -90,9 +90,9 @@ export function TopBar({
           <Kbd>/</Kbd>
         </span>
       </form>
-      <Button variant="primary" onClick={onNewRequest} className="ml-auto">
+      <Button variant="primary" onClick={onNewRequest} className="ml-auto" aria-label="New request">
         <Plus className="size-4" strokeWidth={1.75} aria-hidden />
-        New request
+        <span className="max-sm:hidden">New request</span>
       </Button>
     </header>
   );

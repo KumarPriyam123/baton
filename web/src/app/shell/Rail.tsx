@@ -9,6 +9,7 @@ import {
   Send,
   Sun,
   SunMoon,
+  Timer,
   Users,
 } from "lucide-react";
 import { useState } from "react";
@@ -35,7 +36,7 @@ import { type Theme, applyTheme, getTheme } from "../../lib/theme";
 
 const INBOX_CAP = 100;
 
-function queueLink(filters: Partial<ListFilters>): string {
+export function queueLink(filters: Partial<ListFilters>): string {
   const query = serializeFilters({ ...emptyFilters(), ...filters }).toString();
   return query ? `/items?${query}` : "/items";
 }
@@ -64,6 +65,7 @@ export function Rail() {
   const location = useLocation();
   const attention = useAttention();
   const teams = useTeams();
+  const isAdmin = useMe().data?.user.is_admin ?? false;
 
   const open = [...OPEN_STATUSES];
   const myWork = useFacets({ ...emptyFilters(), assignee: "me", status: open });
@@ -81,7 +83,7 @@ export function Rail() {
   return (
     <nav
       aria-label="Main"
-      className="flex min-h-0 flex-col gap-1 overflow-y-auto bg-desk px-2 py-4 lg:px-3"
+      className="hidden min-h-0 flex-col gap-1 overflow-y-auto bg-desk px-2 py-4 md:flex lg:px-3"
     >
       <Link
         to="/inbox"
@@ -140,6 +142,12 @@ export function Rail() {
           <Gavel className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
           <span className="hidden lg:inline">Decisions</span>
         </NavLink>
+        {isAdmin && (
+          <NavLink to="/admin/jobs" className={linkClass} title="Jobs">
+            <Timer className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
+            <span className="hidden lg:inline">Jobs</span>
+          </NavLink>
+        )}
       </div>
 
       <div className="mt-auto flex flex-col gap-1 pt-4">
@@ -150,7 +158,7 @@ export function Rail() {
   );
 }
 
-function UserMenu() {
+export function UserMenu() {
   const me = useMe();
   const qc = useQueryClient();
   const navigate = useNavigate();

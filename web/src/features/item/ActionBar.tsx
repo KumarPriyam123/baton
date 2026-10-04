@@ -93,7 +93,7 @@ export function ActionBar({
   );
 
   return (
-    <div className="mt-5">
+    <div className="mt-5 max-md:sticky max-md:bottom-0 max-md:z-10 max-md:-mx-6 max-md:border-t max-md:border-rule max-md:bg-sheet max-md:px-6 max-md:py-3">
       <PopoverRoot
         open={form !== null}
         onOpenChange={(open) => {

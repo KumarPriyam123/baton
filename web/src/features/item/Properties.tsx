@@ -35,7 +35,13 @@ import {
 } from "../../lib/format";
 import { describeKept } from "../../lib/rebase";
 import { useCommand } from "../../lib/useCommand";
-import { useSaveFields } from "./useSaveFields";
+import { DueEditor, PropertyChoice } from "./FieldEditors";
+import { type PatchFields, useSaveFields } from "./useSaveFields";
+
+const YES_NO = [
+  { value: "yes", label: "Yes" },
+  { value: "no", label: "No" },
+];
 
 /** "3 h" under two days, then days: the same units as the next-step chip. */
 function overdueSpan(ms: number): string {
@@ -270,12 +276,58 @@ export function Properties({
           {item.requester.name}
         </Row>
         <Row label="Due" changed={changedFields.has("due_at")}>
-          <span className={cn("tnum", due.late && "font-strong text-p0")}>{due.text}</span>
+          <DueEditor item={item}>
+            <span className={cn("tnum", due.late && "font-strong text-p0")}>{due.text}</span>
+          </DueEditor>
         </Row>
         <Row label="Type" changed={changedFields.has("type")}>
-          {TYPE_LABEL[item.type]}
+          <PropertyChoice
+            item={item}
+            field="type"
+            ariaLabel={`Type ${TYPE_LABEL[item.type]}, change`}
+            current={item.type}
+            allowed={() => item.allowed_actions.includes("edit_type")}
+            options={Object.entries(TYPE_LABEL).map(([value, label]) => ({ value, label }))}
+            fields={(value) => ({ type: value as NonNullable<PatchFields["type"]> })}
+          >
+            {TYPE_LABEL[item.type]}
+          </PropertyChoice>
         </Row>
-        <Row label="Needs approval">{item.requires_approval ? "Yes" : "No"}</Row>
+        <Row label="Confidential" changed={changedFields.has("confidential")}>
+          <PropertyChoice
+            item={item}
+            field="confidential"
+            ariaLabel={`Confidential ${item.confidential ? "yes" : "no"}, change`}
+            current={item.confidential ? "yes" : "no"}
+            allowed={() => item.allowed_actions.includes("edit_confidential")}
+            options={YES_NO}
+            fields={(value) => ({ confidential: value === "yes" })}
+          >
+            {item.confidential ? "Yes" : "No"}
+          </PropertyChoice>
+        </Row>
+        <Row label="Needs approval" changed={changedFields.has("requires_approval")}>
+          <PropertyChoice
+            item={item}
+            field="requires_approval"
+            ariaLabel={`Needs approval ${item.requires_approval ? "yes" : "no"}, change`}
+            current={item.requires_approval ? "yes" : "no"}
+            allowed={(value) =>
+              item.allowed_actions.includes(
+                value === "yes" ? "requires_approval_on" : "requires_approval_off",
+              )
+            }
+            options={YES_NO}
+            fields={(value) => ({ requires_approval: value === "yes" })}
+            reason={(value) =>
+              value === "no"
+                ? { title: "Turn off approval", label: "Why is approval no longer needed?" }
+                : undefined
+            }
+          >
+            {item.requires_approval ? "Yes" : "No"}
+          </PropertyChoice>
+        </Row>
         {item.resolution && <Row label="Resolution">{RESOLUTION_LABEL[item.resolution]}</Row>}
         {canWatch && (
           <Row label="Watching">
