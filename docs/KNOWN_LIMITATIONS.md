@@ -9,19 +9,41 @@ ordered by how much it matters to someone using or judging the system; the secon
 | # | Limitation | Effect | What it would take |
 |---|---|---|---|
 | 1 | **Live updates are SSE with a per-process replay buffer** (decision 52). Replay after a reconnect comes from an in-memory ring of 500 events, not from `item_events`, and event ids are not commit-ordered | A restart of the API, or a gap of more than 500 events, makes every client refetch what it shows (`resync`) instead of replaying; an event whose id is lower than one already seen can be missed on a reconnect (the next `resync` or the 20 s bell poll fixes it); several API processes each hold their own buffer | Replay from `item_events` by id with a visibility filter (the BUILD_PLAN design); no "N items changed" bar on the list yet |
-| 2 | **Two screens are not built**: team settings and the jobs page (the dashboard, decision log and notification bell exist since phase 11, lean: see "Phase 11 was lean") | Members are managed only through `/teams/{key}/members`; dead jobs only through `GET /admin/jobs` | Two screens against the generated client |
-| 3 | **Most properties are not editable in the UI**: title, type, due date, confidential, requires-approval (priority, watch and description are) | The API supports every edit (`PATCH`); users cannot do them from the item pane | Inline editors reusing `useSaveFields` and the rebase logic |
+| 2 | **No "N items changed, Refresh order" bar on lists.** A list refetches wholesale when an item in it changes, so a row can move under the pointer; the open item itself updates in place | Someone scanning a long queue can lose their place when another user's change reorders it | A per-list set of changed keys from the stream, shown as a bar the user clicks (DESIGN 4.2) |
+| 3 | **The member endpoints take no `Idempotency-Key`** (`POST`, `PATCH` and `DELETE /teams/{key}/members`); every other state-changing POST does (CLAUDE.md I6 names "every state-changing POST") | A retried "add member" after a lost answer answers 409 `ALREADY_MEMBER` instead of replaying the first answer; harmless, but it is an exception to I6 | Run the three through `idempotency.py` like the item commands, and send a key from `teamMembers.ts` |
 | 4 | **Performance was measured once, read-only, by a reviewer, and the admin paths miss SPEC 13** (`docs/PERFORMANCE.md`): admin queue, facets and dashboard are sequential scans; admin search on a common word took 783 ms in the database; the attention endpoint's wall p95 was over target on a loaded host. Commands, the HTTP layer and the worker were not measured; `bench.py` was not run | The SPEC 13 targets hold for members and leads on the queue and point reads, not for admins; 10x numbers are extrapolated | Index and search changes under "Findings from the independent review" (M3-M5, L5), then run `bench.py` |
 | 5 | **No cleanup job and no fault injection**: idempotency keys, expired sessions and `done` outbox rows are never deleted; `FAULT_NOTIFY_FAIL_RATE` is read but unused | Tables grow; an old idempotency key still replays | The hourly job from SPEC 9 under an advisory lock (a few handlers, a few tests) |
-| 6 | **Test coverage gaps** (TESTING.md, "What is deliberately not tested"): three Playwright scenarios, no axe or screen-reader check, no 375 px layout, no sabotage runs after phase 4, `--profile e2e` Compose service missing | Browser behaviour beyond login, inbox, queue, create and item detail is unproven; phones are not designed for (A10 says "usable") | A Playwright service in `compose.test.yaml`; the remaining plan scenarios; `@axe-core/playwright` on each screen |
+| 6 | **Test coverage gaps** (TESTING.md, "What is deliberately not tested"): Playwright covers claim race, stale edit, double submit, live update and axe on five screens (login, inbox, queue, item detail, dashboard; no serious or critical findings, and axe marked colour contrast "incomplete" on inbox and item detail, which it cannot decide on its own); the palette, jobs page, team settings and 375 px layout have Vitest or screenshots only; no screen-reader check; no sabotage runs after phase 4; no Compose service for Playwright (it runs from the host) | Browser behaviour outside those screens is unproven; contrast was checked by token pairs and screenshots, not by axe's full answer | A Playwright service in `compose.test.yaml`; scenarios for the palette, jobs retry and team settings; axe on the remaining screens and at 375 px; a manual contrast pass on the "incomplete" nodes |
 | 7 | **No deactivate-user endpoint.** Accounts are deactivated in the database, and a deactivated user keeps the items they own | Items can be stuck with someone who has left until a lead reassigns them | An endpoint calling `unassign_owned_items` per team in one transaction (ENGINEERING_DECISIONS 44) |
 | 8 | **Authentication is real but basic**: no absolute session lifetime, failed logins have no time window, the lock reveals which emails exist after five failures, no rate limiting at nginx | A kept-busy stolen cookie never expires; credential stuffing is only slowed per account | `absolute_expires_at`; a `login_attempts` table keyed by email hash; nginx `limit_req`. SSO replaces all of it in production (A1) |
 | 9 | **Append-only is for UPDATE and DELETE, not `TRUNCATE`** | Whoever owns the table can still erase history | Run the app as a role without TRUNCATE; keep the owner role for migrations and the seed |
 | 10 | **Two small consistency windows**: a command is authorised with the roles read at request start (a 2 s window); a replayed 412 can outlive its reason | A just-demoted lead's last in-flight edit can succeed; a client that reuses a key after a rebase is told the old answer | Re-read the role after the lock; include `If-Match` in the idempotency fingerprint (the web client already uses a new key per changed request) |
 | 11 | **Names for ids and long lists are approximate**: a team has its first 50 members in pickers; a former member who never acted reads "someone"; the user directory scans with `ILIKE`; `changes_since` is capped at 100 | Large teams and long histories degrade quietly instead of failing | Server-side names in event payloads; `pg_trgm` index on users; paged pickers |
-| 12 | **Port 8080 must be free** for the default setup | `docker compose up` fails with "port is already allocated" | `WEB_PORT=8081` in `.env` (README). Hit on the author's machine during the clean-clone check |
+| 12 | **Port 8080 must be free** for the default setup | `docker compose up` fails with "port is already allocated" | `WEB_PORT=8081` in `.env` (README). Hit on the author's machine during both clean-clone checks (the final one ran on 8082) |
+| 13 | **The frontend extras were built lean** (command palette, jobs page, team settings, inline edits of title, due date, type, confidential and requires-approval, 375 px layout): each has Vitest coverage and 1280 px screenshots; there is no Playwright scenario for them. A handoff track with many segments scrolls sideways inside the pane (the last segment is cut off until scrolled, no scroll hint). The `c` shortcut is ignored until the shell has loaded (about a second after sign-in). Team pickers still show a team's first 50 members | Rough edges, no wrong data | One scenario per screen; a scroll affordance on the track; register shortcuts before the first data load |
+
+## With another week, in this order
+
+1. **Close the two review findings with a security flavour** (M1, M2 below): filter `duplicate_suggested` by the
+   requester's visibility, and add a Content-Security-Policy plus an `img` override in `Markdown.tsx`.
+2. **Make live updates exact**: replay from `item_events` by id with the visibility filter (instead of the
+   per-process 500-event ring), commit-ordered ids, and the "N items changed" bar (rows 1 and 2).
+3. **Idempotency on the member endpoints**, and `If-Match` in the idempotency fingerprint (rows 3 and 10).
+4. **The cleanup job and fault injection**: hourly job under an advisory lock for old idempotency keys, expired
+   sessions and `done` outbox rows; use `FAULT_NOTIFY_FAIL_RATE` in a failure drill (row 5).
+5. **Make the admin paths meet SPEC 13**: partial indexes that match the queue sort, a bounded candidate set for
+   search, the `refnd` threshold fix, then run `scripts/bench.py` and measure commands and the worker (row 4,
+   M3-M5, L5).
+6. **Close the test gaps**: Playwright service in Compose and in CI, scenarios for the palette, jobs and team
+   settings, axe at 375 px and on the other screens, sabotage runs after phase 4 (row 6).
+7. **A deactivate-user endpoint** that unassigns the person's items in one transaction (row 7).
+8. **Authentication hardening**: absolute session lifetime, a login-attempts window keyed by email hash, nginx
+   `limit_req`, an app role without `TRUNCATE` (rows 8 and 9).
+9. **The rest of the dashboard** (median age, 14-day created-versus-resolved series) and a "going quiet" queue filter.
+10. **Names and long lists**: server-side names in event payloads, a `pg_trgm` index on users, paged pickers (row 11).
 
 CI at submission: see the last entry of this file ("CI status").
+Rows 1-13 are the summary; the numbers are referenced from ENGINEERING_DECISIONS and the ordered list below the table.
 
 ## Out of scope for v1 (SPEC section 15)
 
@@ -227,9 +249,9 @@ a few `E2E ...` requests in the dev database.
 - **SSE (phase 7).** Built later, see decision 52. What is still missing: no "N items changed, Refresh order" bar on the list (lists refetch wholesale).
   Before decision 52 live updates were 10 s polling (measured 9 s). Lists still refetch wholesale, so a
   list page older than a just-applied mutation can show old data until the next refetch.
-- **Editing most properties.** Only priority (optimistic) and watch are editable inline, and the
-  description. Title, type, due date, confidential and requires-approval have no editor even though
-  `allowed_actions` offers them; the Properties rows are read-only.
+- **Editing most properties.** Built later in the frontend extras (inline editors for title, due date, type,
+  confidential and requires-approval; see summary row 13). At the end of this session only priority
+  (optimistic), watch and the description were editable.
 - **Shortcuts on the detail:** `m` (comment box) only. `a`, `p` then a digit and `s` are not wired.
 - **Names for ids.** Event data names people and teams by id. Names come from actors, the item's people
   and the team's first 50 members; a former member who never acted on the item shows as "someone".
@@ -279,9 +301,10 @@ Two React Compiler lint warnings from session A remain.
   SPEC 15, are the fixes.
 - **Decisions about a confidential item are judged against the item now**, like notifications: someone who
   lost access sees none of them, someone who gained it sees all of them.
-- **The bell polls** (the unread count every 20 s, the list while open); it does not use the stream.
-  The count is capped at "20+" (it fetches 21). Opening an item from the popover marks that item's
-  notifications read; opening it any other way (the queue, a link) does not.
+- **The bell polls** (the unread count every 20 s, the list while open) and also takes the unread count from the
+  stream's `notification.created` event. The count is capped at "20+" (it fetches 21). Opening an item from
+  anywhere (popover, queue, link, palette) marks that item's notifications read: `POST /items/{key}/read` does it
+  on the server and the pane refreshes the bell (final pass).
 - **Decision wording uses names the page knows.** A transfer shows team names from `GET /teams`; a person
   who is only an id in the event data would read "someone".
 - **Tests (time box):** one API test per endpoint for visibility, plus paging and filters, and a Vitest test
