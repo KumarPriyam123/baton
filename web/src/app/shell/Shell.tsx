@@ -11,6 +11,7 @@ import {
 import { Outlet, useLocation, useNavigate } from "react-router";
 
 import { NewRequestDialog } from "../../features/create/NewRequestDialog";
+import { CommandPalette } from "../../features/palette/CommandPalette";
 import { useLiveUpdates } from "../../lib/useLiveUpdates";
 import { useShortcuts } from "../../lib/useShortcuts";
 import { Rail } from "./Rail";
@@ -66,6 +67,7 @@ export function Shell({ children }: { children?: ReactNode }) {
         </div>
       </div>
       <NewRequestDialog open={creating} onOpenChange={setCreating} />
+      <CommandPalette />
       {/* Announces live changes to screen readers (DESIGN §7). Toasts have their own region. */}
       <div aria-live="polite" role="status" className="sr-only-live" id="live-region" />
       <div aria-live="assertive" role="alert" className="sr-only-live" id="live-region-assertive" />
