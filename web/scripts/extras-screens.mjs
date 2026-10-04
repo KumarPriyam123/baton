@@ -43,6 +43,20 @@ await lead.keyboard.type("refund");
 await lead.waitForTimeout(900);
 await shot(lead, "palette-search");
 
+await lead.keyboard.press("Escape");
+await lead.getByRole("button", { name: "Edit title" }).click();
+await lead.waitForTimeout(300);
+await shot(lead, "item-edit-title");
+await lead.getByRole("button", { name: "Cancel" }).click();
+await lead.getByRole("button", { name: "Change due date" }).click();
+await lead.waitForTimeout(300);
+await shot(lead, "item-edit-due");
+await lead.keyboard.press("Escape");
+await lead.getByRole("button", { name: /^Type .*change/ }).click();
+await lead.waitForTimeout(300);
+await shot(lead, "item-edit-type"); // never saved: the dev data is shared
+await lead.keyboard.press("Escape");
+
 const admin = await signedIn("Admin");
 await admin.goto(`${base}/admin/jobs?status=dead`);
 await admin.waitForTimeout(2500);
