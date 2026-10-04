@@ -622,3 +622,45 @@ built"; the SPEC text now says what exists.
   the size. The headline figures were 14 px until they used `clsx`. Existing `cn(...)` calls that pair a custom
   size with a colour lose the size (they inherit 14 px); fixing it globally changes existing screens, so it is
   left as a note.
+
+## 52. Phase 7: live updates over SSE (supersedes the polling part of decisions 49 and 50)
+
+Built in a time box of 60 minutes, branch `phase-7-sse`. Working end to end through nginx: curl on the web
+port saw `item.changed` and the 15 s heartbeat, and a Playwright test sees another user's priority change
+in under 2 s with no reload.
+
+- **Server.** `realtime/listener.py` holds one plain asyncpg connection per API process (never the pool),
+  `LISTEN item_changes` and `LISTEN notifications`, reconnects with backoff and, on every (re)connect, calls
+  `hub.reset(newest event id)`, which sends `resync` to every client. `realtime/hub.py` copies each notice into
+  a bounded queue (1,000) per client after `can_view` on the notice's facts and that client's actor context
+  (reloaded every 60 s; a deactivated user's stream closes). A full queue drops the backlog and holds one
+  `resync`. `api/routers/stream.py` authenticates on a short connection and holds none while streaming.
+- **The notice carries the item key** (`item_key`, one more column on the `UPDATE ... RETURNING` that
+  `record_event` already does), because the browser caches items by key. Still no content: `{key, version,
+  event_id}` on the wire.
+- **Deviations from the prompt of this phase, in favour of SPEC and the existing nginx config:** the path is
+  `/api/v1/stream` (SPEC 11, BUILD_PLAN, and the nginx `location` already there), not `/events/stream`; the
+  bell event is `notification.created {unread}`, not `notification {unread_count}`. Event names are SPEC's.
+- **Replay from memory, not from `item_events`.** A ring buffer of the last 500 notices answers
+  `Last-Event-ID`; anything older than the buffer (or than the last listener connect) is `resync`. This is
+  simpler and cannot leak (the notices are filtered per client like live events) but is per process and lost
+  on restart; the client refetches what it shows in that case, so the cost is a refetch, not a wrong screen.
+  Event ids are not commit-ordered, so an event with a lower id than one already seen can be missed across a
+  reconnect (KNOWN_LIMITATIONS 1).
+- **Transfer.** A notice has `prev_team_id`; the previous team's members are sent it too, and their refetch is 404.
+- **`NOTIFY` is the commit guarantee.** Postgres delivers it only when the transaction commits, so there is no
+  event for a rolled-back command (tested with a real `record_event` followed by a raise).
+- **Client.** One `EventSource` for the whole signed-in app, mounted in `Shell` (it was mounted in the item
+  detail only, so lists never moved). `item.changed` is coalesced per item over 250 ms, skipped when the cache
+  already holds that `(version, event_id)` (our own mutation's echo), and refetches through the merging item
+  query (I13). Reconnect backoff 1 s to 30 s with `?last_event_id=`. After 3 failed connects in a row it polls
+  every 10 s and keeps trying to reconnect; the first open stops the polling. The bell takes `unread` from the
+  event and keeps its own 20 s poll as a fallback.
+- **Not done:** the "N items changed" bar, replay from `item_events`, a test that a non-reading client keeps
+  server memory flat (the bounded queue is unit-tested), and multi-process behaviour (two API processes each
+  listen; each has its own buffer).
+- **Tests.** `tests/unit/test_hub.py` (bounds, visibility, transfer, replay, reset), `tests/integration/test_stream.py`
+  (real uvicorn on a socket: 401 without a session, headers, a confidential item reaches the lead and not a
+  member or another team, nothing on rollback, replay, `resync` for an old id), `web/src/lib/useLiveUpdates.test.tsx`
+  (20 events in 100 ms is one refetch, resync, notification, backoff with last id, polling fallback and its stop),
+  `web/e2e/live-updates.spec.ts`.
