@@ -27,6 +27,7 @@ import { useNow } from "../../lib/useNow";
 import { ActionBar } from "./ActionBar";
 import { ApprovalPanel, StaleApprovalPanel } from "./ApprovalPanel";
 import { Description } from "./Description";
+import { TitleEditor } from "./FieldEditors";
 import { HandoffTrack } from "./HandoffTrack";
 import { useNames } from "./names";
 import { Properties } from "./Properties";
@@ -247,9 +248,7 @@ function Loaded({ item, onClose }: { item: ItemOut; onClose: () => void }) {
           <X className="size-4" strokeWidth={1.75} />
         </button>
       </div>
-      <h2 className={washed.has("title") ? "wash mt-1 text-item" : "mt-1 text-item"}>
-        {item.title}
-      </h2>
+      <TitleEditor item={item} washed={washed.has("title")} />
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-meta">
         <span
           className={
