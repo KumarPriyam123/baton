@@ -345,3 +345,5 @@ reported it.
 ## CI status
 
 At tag `submission-candidate-1`, CI (api, web, hygiene) is green on `main` (run 37149574243). The `web` job had been red since frontend session A because ESLint could not type-check `web/scripts/*.mjs`; fixed in `web/eslint.config.js`. The Playwright tests are not run in CI.
+
+At tag `submission-final` (and the docs commit after it), CI (api, web, hygiene) is green on `main`: https://github.com/KumarPriyam123/baton/actions/runs/37171539413 (the code was last changed at `0667f34`, run 37170663268, also green). The Playwright tests are still not run in CI.
