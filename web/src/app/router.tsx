@@ -5,6 +5,7 @@ import { LoginPage } from "../features/auth/LoginPage";
 import { DashboardPage } from "../features/dashboard/DashboardPage";
 import { DecisionsPage } from "../features/decisions/DecisionsPage";
 import { InboxPage } from "../features/inbox/InboxPage";
+import { JobsPage } from "../features/jobs/JobsPage";
 import { QueuePage } from "../features/queue/QueuePage";
 import { EmptyState } from "../components/ui/States";
 import { Button } from "../components/ui/Button";
@@ -75,6 +76,7 @@ export const router = createBrowserRouter([
           { path: "inbox", element: <InboxPage />, errorElement: <RouteError /> },
           { path: "dashboard", element: <DashboardPage />, errorElement: <RouteError /> },
           { path: "decisions", element: <DecisionsPage />, errorElement: <RouteError /> },
+          { path: "admin/jobs", element: <JobsPage />, errorElement: <RouteError /> },
           { path: "items/:key?", element: <QueuePage />, errorElement: <RouteError /> },
           { path: "*", element: <NotFound /> },
         ],
