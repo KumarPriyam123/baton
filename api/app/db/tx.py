@@ -204,7 +204,11 @@ async def record_event(
             sa.update(schema.work_items)
             .where(schema.work_items.c.id == item.id)
             .values(**stamp)
-            .returning(schema.work_items.c.version, schema.work_items.c.team_id)
+            .returning(
+                schema.work_items.c.version,
+                schema.work_items.c.team_id,
+                schema.work_items.c.key,
+            )
         )
     ).one()
     if (stamped.version, stamped.team_id) != (item.version, item.team_id):
@@ -221,6 +225,7 @@ async def record_event(
     notice = {
         "event_id": event_id,
         "item_id": str(item.id),
+        "item_key": stamped.key,
         "version": item.version,
         "team_id": str(item.team_id),
         "prev_team_id": str(prev_team_id) if prev_team_id else None,
