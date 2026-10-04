@@ -21,14 +21,14 @@ If code and SPEC disagree, the code is wrong. If SPEC looks wrong, **stop and as
 | Data access | SQLAlchemy 2.0 **Core** (async) + asyncpg; explicit SQL for critical paths; Alembic migrations (hand-written SQL allowed) |
 | Database | PostgreSQL 16 with `citext`, `pg_trgm` |
 | Worker | same codebase, separate process (`python -m app.worker`) |
-| Live updates | Server-Sent Events: one direct asyncpg `LISTEN` connection per API process -> in-process hub -> `GET /api/v1/stream`; client falls back to 10 s polling |
+| Live updates | Server-Sent Events: one direct asyncpg `LISTEN` connection per API process -> in-process hub (500-event replay ring, per process) -> `GET /api/v1/stream`; after 3 failed connects the client polls every 10 s and keeps retrying SSE (ENGINEERING_DECISIONS #52) |
 | Auth | argon2-cffi, server-side sessions in Postgres, CSRF double-submit |
 | Logging | structlog JSON with request id |
 | API tests | pytest, pytest-asyncio, httpx, hypothesis, time-machine |
 | Python tooling | uv, ruff, mypy (strict for `app/domain`, `app/services`) |
 | Web | React + TypeScript (strict) + Vite, React Router |
 | Server state | TanStack Query v5 (+ TanStack Virtual for long lists) |
-| UI primitives | Radix UI, cmdk, Sonner, lucide-react, Tailwind CSS v4, clsx + tailwind-merge |
+| UI primitives | Radix UI, cmdk (command palette), Sonner, lucide-react, Tailwind CSS v4, clsx + tailwind-merge (`cn()` is `extendTailwindMerge`d with Baton's text sizes) |
 | Forms | react-hook-form + zod |
 | API client | openapi-typescript + openapi-fetch, generated from the API's OpenAPI |
 | Content | react-markdown + remark-gfm (**no** rehype-raw), jsdiff, date-fns |
@@ -61,7 +61,7 @@ web/
     app/         router.tsx  providers.tsx  shell/
     api/         generated.ts  client.ts  keys.ts
     lib/         api.ts  itemCache.ts  useCommand.ts  rebase.ts  useLiveUpdates.ts  shortcuts.ts
-    features/    inbox/  queue/  item/  create/  dashboard/  decisions/  teams/  jobs/  auth/
+    features/    inbox/  queue/  item/  create/  dashboard/  decisions/  notifications/  palette/  teams/  jobs/  auth/
     components/ui/
     styles/      tokens.css  globals.css
   e2e/
@@ -78,10 +78,10 @@ Everything runs in containers so it works the same on Windows, macOS and Linux.
 | Start everything | `docker compose up --build` → http://localhost:8080 |
 | API tests | `docker compose -f compose.yaml -f compose.test.yaml run --rm api-test` |
 | Web unit tests | `docker compose -f compose.yaml -f compose.test.yaml run --rm web-test` |
-| End-to-end | `docker compose -f compose.yaml -f compose.test.yaml --profile e2e up --abort-on-container-exit` |
+| End-to-end (Playwright, from the host; no Compose service yet) | stack up, then `cd web && BASE_URL=http://localhost:8080 npx playwright test` (add `PW_CHANNEL=chrome` to use an installed Chrome, else `npx playwright install chromium` once) |
 | Large seed (separate database, see hazards) | `docker compose exec db createdb -U baton baton_large` once, then `L=postgresql+asyncpg://baton:baton@db:5432/baton_large; docker compose run --rm -e DATABASE_URL=$L migrate; docker compose run --rm -e DATABASE_URL=$L seed python -m scripts.seed --size large --reset` |
 | New migration | `docker compose run --rm migrate alembic revision -m "<msg>"` |
-| Regenerate API types | `cd web && npm run gen:api` (API must be running) |
+| Regenerate API types | `cd web && npm run gen:api` (stack must be up; `OPENAPI_URL=http://localhost:8081/api/openapi.json` if `WEB_PORT` is not 8080) |
 | Two workers | `docker compose up --scale worker=2` |
 | Test containers | `api-test` mounts `./api` and `web-test` mounts `./web/src`, so source changes need no rebuild. After dependency or Dockerfile changes, add `--build` (e.g. `run --rm --build api-test`). |
 
