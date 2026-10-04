@@ -91,12 +91,12 @@ test("stale edit: A edits the description while B saves a new one, A gets the co
   }
 
   // A starts editing and types, but does not save yet.
-  await a.page.getByRole("button", { name: "Edit" }).click();
+  await a.page.getByRole("button", { name: "Edit", exact: true }).click();
   const aBox = a.page.getByRole("textbox", { name: "Description" });
   await aBox.fill("The first draft of the description, plus a sentence from A.");
 
   // B saves a different description first.
-  await b.page.getByRole("button", { name: "Edit" }).click();
+  await b.page.getByRole("button", { name: "Edit", exact: true }).click();
   await b.page
     .getByRole("textbox", { name: "Description" })
     .fill("A completely different text from B.");
