@@ -7,6 +7,7 @@ import { DecisionsPage } from "../features/decisions/DecisionsPage";
 import { InboxPage } from "../features/inbox/InboxPage";
 import { JobsPage } from "../features/jobs/JobsPage";
 import { QueuePage } from "../features/queue/QueuePage";
+import { TeamSettingsPage } from "../features/teams/TeamSettingsPage";
 import { EmptyState } from "../components/ui/States";
 import { Button } from "../components/ui/Button";
 import { Shell } from "./shell/Shell";
@@ -77,6 +78,11 @@ export const router = createBrowserRouter([
           { path: "dashboard", element: <DashboardPage />, errorElement: <RouteError /> },
           { path: "decisions", element: <DecisionsPage />, errorElement: <RouteError /> },
           { path: "admin/jobs", element: <JobsPage />, errorElement: <RouteError /> },
+          {
+            path: "teams/:key/settings",
+            element: <TeamSettingsPage />,
+            errorElement: <RouteError />,
+          },
           { path: "items/:key?", element: <QueuePage />, errorElement: <RouteError /> },
           { path: "*", element: <NotFound /> },
         ],
