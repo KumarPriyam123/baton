@@ -11,7 +11,7 @@ ordered by how much it matters to someone using or judging the system; the secon
 | 1 | **Live updates are SSE with a per-process replay buffer** (decision 52). Replay after a reconnect comes from an in-memory ring of 500 events, not from `item_events`, and event ids are not commit-ordered | A restart of the API, or a gap of more than 500 events, makes every client refetch what it shows (`resync`) instead of replaying; an event whose id is lower than one already seen can be missed on a reconnect (the next `resync` or the 20 s bell poll fixes it); several API processes each hold their own buffer | Replay from `item_events` by id with a visibility filter (the BUILD_PLAN design); no "N items changed" bar on the list yet |
 | 2 | **Two screens are not built**: team settings and the jobs page (the dashboard, decision log and notification bell exist since phase 11, lean: see "Phase 11 was lean") | Members are managed only through `/teams/{key}/members`; dead jobs only through `GET /admin/jobs` | Two screens against the generated client |
 | 3 | **Most properties are not editable in the UI**: title, type, due date, confidential, requires-approval (priority, watch and description are) | The API supports every edit (`PATCH`); users cannot do them from the item pane | Inline editors reusing `useSaveFields` and the rebase logic |
-| 4 | **Performance was not measured.** The large seed (50,000 items) loads and verifies, but there is no `bench.py`, no `PERFORMANCE.md`, no p95 | The SPEC 13 targets are unproven; an admin's unfiltered list sorts the whole table (about 20 ms at 50,000 items, measured once) | Run `bench.py` per BUILD_PLAN phase 12; add the `COALESCE(due_at, 'infinity')` expression indexes if `EXPLAIN` asks |
+| 4 | **Performance was measured once, read-only, by a reviewer, and the admin paths miss SPEC 13** (`docs/PERFORMANCE.md`): admin queue, facets and dashboard are sequential scans; admin search on a common word took 783 ms in the database; the attention endpoint's wall p95 was over target on a loaded host. Commands, the HTTP layer and the worker were not measured; `bench.py` was not run | The SPEC 13 targets hold for members and leads on the queue and point reads, not for admins; 10x numbers are extrapolated | Index and search changes under "Findings from the independent review" (M3-M5, L5), then run `bench.py` |
 | 5 | **No cleanup job and no fault injection**: idempotency keys, expired sessions and `done` outbox rows are never deleted; `FAULT_NOTIFY_FAIL_RATE` is read but unused | Tables grow; an old idempotency key still replays | The hourly job from SPEC 9 under an advisory lock (a few handlers, a few tests) |
 | 6 | **Test coverage gaps** (TESTING.md, "What is deliberately not tested"): three Playwright scenarios, no axe or screen-reader check, no 375 px layout, no sabotage runs after phase 4, `--profile e2e` Compose service missing | Browser behaviour beyond login, inbox, queue, create and item detail is unproven; phones are not designed for (A10 says "usable") | A Playwright service in `compose.test.yaml`; the remaining plan scenarios; `@axe-core/playwright` on each screen |
 | 7 | **No deactivate-user endpoint.** Accounts are deactivated in the database, and a deactivated user keeps the items they own | Items can be stuck with someone who has left until a lead reassigns them | An endpoint calling `unassign_owned_items` per team in one transaction (ENGINEERING_DECISIONS 44) |
@@ -102,8 +102,8 @@ only matters for a client that reuses keys.
 
 ## An admin's unfiltered item list sorts the whole table
 
-About 20 ms on 50,000 items, on every page. It needs the expression indexes of decision 10, which
-phase 12 measures (ENGINEERING_DECISIONS 32).
+The author measured about 20 ms on 50,000 items; the independent review measured 47-76 ms (sequential
+scan, deep pages slower than the first). It needs the expression indexes of decision 10 (see review M3 below).
 
 ## `changes_since` shows at most the 100 oldest changes
 
@@ -288,6 +288,36 @@ Two React Compiler lint warnings from session A remain.
   of the badge cap. No Playwright, no T-VIS property test over the new endpoints, no query-count guard
   for the dashboard, no axe run, no 375 px layout, no sabotage run and no independent review.
 - **The popover's focus and keyboard behaviour is Radix's**; it was not driven by keyboard here.
+
+## Findings from the independent review (Medium and Low)
+
+Source: `docs/notes/review.md`, written against `57662ad`, triaged at `552e526`. No Critical or High
+findings, so none were fixed in code. "Confirmed" says what was checked; the rest is as the reviewer
+reported it.
+
+- **M1. `duplicate_suggested` reveals that a hidden item exists** (confirmed by reading). `similar_to`
+  has no visibility filter and the event carries `count` and `top_score`, which the requester can read.
+  A user raising a request to a team they are not in can probe titles. Fix: filter by the requester's
+  visibility or drop the numbers; add a T-VIS case.
+- **M2. No Content-Security-Policy, and Markdown renders remote images** (confirmed). SPEC 5.4 promises
+  a strict CSP; `nginx.conf` sets none. A comment with `![](https://host/x.png)` makes every viewer's
+  browser fetch it. Fix: CSP header plus an `img` override in `Markdown.tsx`.
+- **M3. Queue pagination is not index-ordered** (reported, EXPLAIN on `baton_large`). Admin: sequential
+  scan, deep pages slower; members: heap scan of everything visible. `work_items_team_queue_idx` cannot
+  give the sort order. Fix: partial indexes matching the sort, per-team `LATERAL` top-N; correct SPEC 3.2.
+- **M4. Admin search on a common word is a sequential scan** (reported): 783 ms for `refund`. Fix: rank a
+  bounded candidate set.
+- **M5. The documented typo `refnd` finds nothing** (reproduced: `word_similarity` 0.5 < 0.6 threshold,
+  0 rows). The test uses a longer word. Fix: lower `pg_trgm.word_similarity_threshold` for the statement
+  and test `refnd`.
+- **L1.** Rapid priority edits can 412 against the user's own earlier edit (`useSaveFields` reads the
+  version at call time). **L2.** An older poll response with an equal `(version, last_event_id)` can flip
+  `watching` back for up to 10 s. **L3.** Opening an item marks read up to the server's current
+  `last_event_id`, which can include a comment not yet shown. **L4.** An out-of-range cursor priority or an
+  integer cursor above 2^63-1 probably returns 500, not 400 (reading only). **L5.** The dashboard's "five
+  oldest" has no `(team_id, created_at)` index: 178 ms for an admin. **L6.** `sla_breached_at` is never
+  cleared, so an item whose due date moves out still shows "Overdue" in some places.
+- **L7** (docs and SSE disagree) was obsolete when triaged: SSE has since merged.
 
 ## CI status
 
