@@ -1,9 +1,9 @@
 """Fan-out of committed changes to connected browsers (SPEC 10).
 
-The listener hands every NOTIFY to `Hub.publish`; the hub copies it into each client's bounded queue
-after asking `can_view` about that client. Only `{key, version, event_id}` ever reaches the wire:
-the browser refetches through the normal authorized API, so a stale or wrong visibility decision
-here can at worst send a "something changed" nudge, never content.
+The listener hands every notice Postgres delivers to `Hub.publish`; the hub copies it into each
+client's bounded queue after asking `can_view` about that client. Only `{key, version, event_id}`
+ever reaches the wire: the browser refetches through the normal authorized API, so a stale or
+wrong visibility decision here can at worst send a "something changed" nudge, never content.
 
 Bounded everywhere: a client that does not read gets its backlog dropped and one `resync`, and the
 replay buffer keeps the last `BUFFER_SIZE` events.

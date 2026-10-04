@@ -208,6 +208,7 @@ async def test_it_notifies_listeners_with_the_spec_payload_only_after_commit(
     assert notice == {
         "event_id": event_id,
         "item_id": str(world.item_id),
+        "item_key": world.item_key,
         "version": 4,
         "team_id": str(world.team.id),
         "prev_team_id": None,

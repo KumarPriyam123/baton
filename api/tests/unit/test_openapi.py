@@ -13,7 +13,8 @@ from app.config import Settings
 from app.main import create_app
 
 # Streams and probes whose bodies are not a typed JSON model by design.
-NO_JSON_MODEL: set[tuple[str, str]] = set()
+# The SSE stream is text/event-stream, not JSON.
+NO_JSON_MODEL: set[tuple[str, str]] = {("get", "/api/v1/stream")}
 
 
 @pytest.fixture(scope="module")
