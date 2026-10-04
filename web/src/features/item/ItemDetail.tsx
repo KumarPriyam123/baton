@@ -3,8 +3,8 @@
  * timeline. The right-hand pane of the queue and the /items/:key page are this one component.
  *
  * It decides nothing about the workflow: buttons come from `allowed_actions` (I4), the primary one
- * from `next_step`, every number from the server's item. Live changes arrive by polling
- * (lib/useLiveUpdates.ts) and are merged, never overwritten.
+ * from `next_step`, every number from the server's item. Live changes arrive over the
+ * app-wide stream (lib/useLiveUpdates.ts, mounted in the shell) and are merged, never overwritten.
  */
 import { useQueryClient } from "@tanstack/react-query";
 import { Lock, X } from "lucide-react";
@@ -23,7 +23,6 @@ import { type EventOut, lastEventSentence } from "../../lib/eventText";
 import { STATUS_LABEL, TYPE_LABEL } from "../../lib/format";
 import { compareVersion } from "../../lib/itemCache";
 import { useCommand } from "../../lib/useCommand";
-import { useLiveUpdates } from "../../lib/useLiveUpdates";
 import { useNow } from "../../lib/useNow";
 import { ActionBar } from "./ActionBar";
 import { ApprovalPanel, StaleApprovalPanel } from "./ApprovalPanel";
@@ -55,7 +54,6 @@ export function ItemDetail({
   onClose: () => void;
 }) {
   const item = useItem(itemKey);
-  useLiveUpdates({ itemKey });
 
   if (!itemKey) {
     return (
