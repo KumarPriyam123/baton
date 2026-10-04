@@ -6,6 +6,12 @@ It is built to stay correct when people act at the same time: atomic claims, opt
 idempotent writes, content-bound approvals, resource-level authorization and an outbox worker.
 Stack: FastAPI + PostgreSQL 16 (state, queue, search) + React/TypeScript, all in Docker Compose.
 
+![Inbox: what needs me, grouped, with the next action on each row](docs/screenshots/inbox.png)
+
+![A request with its handoff track, properties and actions](docs/screenshots/item-detail.png)
+
+![Dashboard: per-team load, overdue and unowned work; every figure links to the matching queue](docs/screenshots/dashboard.png)
+
 ## Quick start
 
 Needs Docker with Compose v2. Nothing else is installed on the host.
@@ -57,9 +63,15 @@ end-to-end tests run from the host against a running stack; see [docs/TESTING.md
 | Queue and item | `/items`, `/items/PAY-142` | filter, search, act on one request, its handoff track and timeline |
 | Dashboard | `/dashboard` | per team: open by status and priority, overdue, unowned, going quiet, oldest items, load per owner; every figure links to the matching queue |
 | Decisions | `/decisions` | why things were approved, closed, moved or downgraded, with the reason; filter by team and kind |
-| Notifications | the bell in the rail | unread count (capped at "20+"), latest updates grouped by item, mark read |
+| Notifications | the bell in the rail | unread count (capped at "20+"), latest updates grouped by item, mark read; opening the item from anywhere marks its notifications read |
+| Command palette | `Ctrl+K` / `Cmd+K` | go to a screen or team queue, find a request by key or words, start a new one |
+| Jobs | `/admin/jobs` (admin) | pending, dead and recently done background jobs, with retry for dead ones |
+| Team settings | `/teams/PAY/settings` (leads) | members and roles, add and remove (removing unassigns their open items, with a confirmation) |
+| Mobile | any screen at 375 px | bottom navigation; inbox, queue and item detail are laid out for a phone |
 
-Not built: team settings, the jobs page, the command palette (see `docs/KNOWN_LIMITATIONS.md`).
+Live updates arrive over Server-Sent Events (a request changed by someone else updates on screen without a reload);
+the client falls back to 10-second polling if the stream cannot connect. Gaps and what was left out are in
+`docs/KNOWN_LIMITATIONS.md`.
 
 ## Repo map
 
@@ -75,7 +87,7 @@ api/                    FastAPI service, worker, migrations, seed (Python 3.12)
   scripts/                seed.py, verify_seed.py, bench.py
   tests/                  unit/ db/ integration/ concurrency/ perf/
 web/                    React + TypeScript + Vite SPA (served by nginx in Compose)
-  src/features/           inbox, queue, item, create, dashboard, decisions, notifications, auth
+  src/features/           inbox, queue, item, create, dashboard, decisions, notifications, palette, teams, jobs, auth
   e2e/                    Playwright
 docs/                   see below
 ```
